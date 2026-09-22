@@ -598,35 +598,44 @@
   }
 
   async function openProject(id) {
-    const project = await idbGet(IDB_STORE_PROJECTS, id);
-    if (!project) return;
+    try {
+      const project = await idbGet(IDB_STORE_PROJECTS, id);
+      if (!project) { alert("Couldn't find that project — it may have been deleted."); return; }
 
-    if (project.photoBlob) {
-      const img = await loadImageFromBlob(project.photoBlob);
-      if (img) {
-        state.image = img;
-        dropHint.classList.add('hidden');
-        exportBtn.disabled = false;
+      if (project.photoBlob) {
+        const img = await loadImageFromBlob(project.photoBlob);
+        if (img) {
+          state.image = img;
+          dropHint.classList.add('hidden');
+          exportBtn.disabled = false;
+        } else {
+          state.image = null;
+          dropHint.classList.remove('hidden');
+          exportBtn.disabled = true;
+        }
+      } else {
+        state.image = null;
+        dropHint.classList.remove('hidden');
+        exportBtn.disabled = true;
       }
-    } else {
-      state.image = null;
-      dropHint.classList.remove('hidden');
-      exportBtn.disabled = true;
+
+      state.logo.img = project.logoBlob ? await loadImageFromBlob(project.logoBlob) : null;
+
+      if (project.recipe) applyRecipeToState(project.recipe);
+      if (project.imageTransform && typeof project.imageTransform.zoom === 'number') {
+        state.imageTransform = project.imageTransform;
+      } else {
+        state.imageTransform = { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5 };
+      }
+
+      syncAllControlsFromState();
+      applyPreset(state.preset);
+      render();
+      closeLibrary();
+    } catch (err) {
+      console.error('Failed to open project', id, err);
+      alert("Sorry, this project couldn't be opened — its saved data may be corrupted or too large for this device to load. Try deleting and re-saving it.");
     }
-
-    state.logo.img = project.logoBlob ? await loadImageFromBlob(project.logoBlob) : null;
-
-    if (project.recipe) applyRecipeToState(project.recipe);
-    if (project.imageTransform && typeof project.imageTransform.zoom === 'number') {
-      state.imageTransform = project.imageTransform;
-    } else {
-      state.imageTransform = { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5 };
-    }
-
-    syncAllControlsFromState();
-    applyPreset(state.preset);
-    render();
-    closeLibrary();
   }
 
   function openLibrary() {
@@ -930,7 +939,8 @@
   // ---------- preset / canvas sizing ----------
 
   function applyPreset(key) {
-    const p = PRESETS[key];
+    const p = PRESETS[key] || PRESETS['1080x1350']; // fall back if a saved project has an unrecognised/corrupted preset key
+    key = PRESETS[key] ? key : '1080x1350';
     state.preset = key;
     state.canvasW = p.w;
     state.canvasH = p.h;
