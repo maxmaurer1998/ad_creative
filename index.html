@@ -69,10 +69,14 @@
         <input type="checkbox" id="safeZoneToggle" />
       </div>
       <div class="control-row">
-        <label for="marginSlider">Side margin <span id="marginVal">8%</span></label>
+        <label for="marginSlider">Left/right margin <span id="marginVal">8%</span></label>
         <input type="range" id="marginSlider" min="2" max="20" value="8" />
       </div>
-      <p class="hint-text">Sets the left/right margin shared by the headline, subheader, other text, and how close the logo can be dragged to the edge.</p>
+      <div class="control-row">
+        <label for="marginVSlider">Top/bottom margin <span id="marginVVal">6%</span></label>
+        <input type="range" id="marginVSlider" min="2" max="20" value="6" />
+      </div>
+      <p class="hint-text">Both margins apply symmetrically (equal on each side) and are shared by the headline/subheader/other text and how close the logo can be positioned to any edge.</p>
       <div class="control-row">
         <label for="imageInput2">Photo</label>
         <label for="imageInput" class="btn btn-secondary">Choose photo…</label>
@@ -246,6 +250,14 @@
         <input type="range" id="logoSize" min="5" max="50" value="18" />
       </div>
       <div class="control-row">
+        <label for="logoVPos">Vertical position</label>
+        <input type="range" id="logoVPos" min="0" max="100" value="82" />
+      </div>
+      <div class="range-scale-labels">
+        <span>Top</span>
+        <span>Bottom</span>
+      </div>
+      <div class="control-row">
         <label>Logo colour</label>
         <div class="segmented" id="logoColorMode">
           <button data-val="original" class="active">Original</button>
@@ -258,7 +270,7 @@
         <input type="color" id="logoCustomColor" value="#ffffff" />
       </div>
       <p class="hint-text">Tints the logo's opaque pixels: "Custom" uses the colour you pick, "Match fade" always tracks the current fade colour. Works well for a single-colour/silhouette logo; a multi-colour logo will lose its original colours when either is on.</p>
-      <p class="hint-text">Drag the logo directly on the canvas to fine-tune its position. Guide lines appear while dragging — the logo can't be dragged past the same left/right margin as the text, at any size.</p>
+      <p class="hint-text">Drag the logo directly on the canvas, or use the slider above for precise vertical placement. Guide lines appear while dragging — the logo can't be moved past the same left/right or top/bottom margins as the text, at any size.</p>
       <div class="control-row">
         <label>Default logo</label>
         <button id="saveLogoBtn" class="btn btn-secondary">Save as default</button>

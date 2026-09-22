@@ -21,9 +21,9 @@ For the "Add to Home Screen" / installable PWA behaviour and the Web Share API "
 - Fade overlay: direction (top/bottom), reach, speed-to-solid, and an intensity cap (so the darkest point can be dialled down to a light tint instead of ever becoming a fully solid block), colour — using the smoothstep + plateau easing so the fade always blends to 0% opacity at its outer edge
 - Three independent text layers (headline, subheader, optional "other" line), each with font, size, colour; horizontal alignment and a continuous vertical-position slider apply to the stacked text block as a whole, always staying inside the top/bottom edge padding
 - Inline legibility warning banner when the text block sits over an insufficiently-faded area
-- Logo upload with drag-to-position on canvas (clamped to the same side margin as the text at any size, with guide lines while dragging), corner + center position presets, and a colour choice: keep the logo's original colours, tint it to a custom colour you pick, or tint it to always match the current fade colour
+- Logo upload with drag-to-position on canvas or a vertical-position slider (both clamped to the same left/right and top/bottom margins as the text, at any size, with guide lines while dragging), corner + center position presets, and a colour choice: keep the logo's original colours, tint it to a custom colour you pick, or tint it to always match the current fade colour
 - A persistent "default logo" (separate from the working session) that's saved once and then loads automatically in future sessions, surviving "Clear saved session"
-- Adjustable side margin, shared by the text block width and the logo drag clamp
+- Independent left/right and top/bottom margin sliders (each symmetric), shared by the text block's width/vertical range and the logo's drag/slider clamp
 - Story/Reels safe-zone overlay toggle
 - Export renders at up to the photo's own native resolution (not capped at the on-screen preset size), with high-quality resampling and no in-app-only guides (safe zone, logo drag guides) ever baked in — via the Web Share API where supported (native "Save to Photos" sheet) with a download-link fallback
 - Installable PWA: manifest + service worker precaching the app shell and self-hosted fonts for offline use, with network-first HTML so updates show up automatically

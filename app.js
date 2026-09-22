@@ -36,6 +36,7 @@
   }
 
   const DEFAULT_MARGIN_FRAC = 0.08;
+  const DEFAULT_MARGIN_V_FRAC = 0.06;
 
   const LS_KEY = 'adcreative.prefs.v1'; // legacy, read-only fallback for pre-session-save versions
 
@@ -47,6 +48,7 @@
     canvasH: 1350,
     safeZone: false,
     marginFrac: DEFAULT_MARGIN_FRAC, // left/right margin, shared by text wrap and logo drag clamp
+    marginVFrac: DEFAULT_MARGIN_V_FRAC, // top/bottom margin, shared by text vertical range and logo vertical clamp
     image: null,   // HTMLImageElement
     imageTransform: { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5 }, // pan/zoom, tied to this specific photo
     positionEditMode: false, // true only while the Position tab is open
@@ -218,6 +220,7 @@
       preset: state.preset,
       safeZone: state.safeZone,
       marginFrac: state.marginFrac,
+      marginVFrac: state.marginVFrac,
       fade: { ...state.fade },
       text: {
         hAlign: state.text.hAlign,
@@ -244,6 +247,7 @@
     if (recipe.preset && PRESETS[recipe.preset]) state.preset = recipe.preset;
     if (typeof recipe.safeZone === 'boolean') state.safeZone = recipe.safeZone;
     if (typeof recipe.marginFrac === 'number') state.marginFrac = recipe.marginFrac;
+    if (typeof recipe.marginVFrac === 'number') state.marginVFrac = recipe.marginVFrac;
     if (recipe.fade) {
       Object.assign(state.fade, recipe.fade);
       if (typeof state.fade.intensity !== 'number') state.fade.intensity = 100; // pre-intensity-slider recipes
@@ -733,6 +737,26 @@
     render();
   });
 
+  // maps the logo's vertical position <-> a 0 (top) .. 100 (bottom) slider,
+  // across the same bounds dragging is clamped to
+  function logoVPosValueToYPct(value) {
+    const { minY, maxY } = getLogoBounds();
+    if (minY > maxY) return 0.5;
+    return minY + (maxY - minY) * (value / 100);
+  }
+  function yPctToLogoVPosValue(yPct) {
+    const { minY, maxY } = getLogoBounds();
+    if (maxY <= minY) return 50;
+    return Math.round(((yPct - minY) / (maxY - minY)) * 100);
+  }
+
+  const logoVPos = document.getElementById('logoVPos');
+  logoVPos.addEventListener('input', () => {
+    state.logo.yPct = logoVPosValueToYPct(Number(logoVPos.value));
+    state.logo.manuallyPositioned = true;
+    render();
+  });
+
   const logoCustomColorRow = document.getElementById('logoCustomColorRow');
   wireSegmented('logoColorMode', (val) => {
     state.logo.colorMode = val;
@@ -765,6 +789,17 @@
   marginSlider.addEventListener('input', () => {
     state.marginFrac = Number(marginSlider.value) / 100;
     marginVal.textContent = `${marginSlider.value}%`;
+    const clamped = clampLogoPosition(state.logo.xPct, state.logo.yPct);
+    state.logo.xPct = clamped.xPct;
+    state.logo.yPct = clamped.yPct;
+    render();
+  });
+
+  const marginVSlider = document.getElementById('marginVSlider');
+  const marginVVal = document.getElementById('marginVVal');
+  marginVSlider.addEventListener('input', () => {
+    state.marginVFrac = Number(marginVSlider.value) / 100;
+    marginVVal.textContent = `${marginVSlider.value}%`;
     const clamped = clampLogoPosition(state.logo.xPct, state.logo.yPct);
     state.logo.xPct = clamped.xPct;
     state.logo.yPct = clamped.yPct;
@@ -1011,7 +1046,7 @@
 
     // vAlign is 0 (top) .. 100 (bottom); vPad keeps the block from ever
     // touching the very top/bottom edge, however far it's slid
-    const vPad = H * 0.06;
+    const vPad = H * state.marginVFrac;
     const topmostY = vPad;
     const bottommostY = H - vPad - totalHeight;
     const startY = topmostY + (bottommostY - topmostY) * (state.text.vAlign / 100);
@@ -1042,15 +1077,16 @@
 
   function applyLogoCorner(corner) {
     const margin = state.marginFrac;
+    const marginV = state.marginVFrac;
     const sizeFrac = state.logo.sizePct / 100;
     const halfW = sizeFrac / 2;
     const aspect = state.logo.img ? state.logo.img.naturalHeight / state.logo.img.naturalWidth : 1;
     const halfH = (sizeFrac * aspect) / 2 * (state.canvasW / state.canvasH);
 
-    if (corner === 'top-left') { state.logo.xPct = margin + halfW; state.logo.yPct = margin + halfH; }
-    else if (corner === 'top-right') { state.logo.xPct = 1 - margin - halfW; state.logo.yPct = margin + halfH; }
-    else if (corner === 'bottom-left') { state.logo.xPct = margin + halfW; state.logo.yPct = 1 - margin - halfH; }
-    else if (corner === 'bottom-right') { state.logo.xPct = 1 - margin - halfW; state.logo.yPct = 1 - margin - halfH; }
+    if (corner === 'top-left') { state.logo.xPct = margin + halfW; state.logo.yPct = marginV + halfH; }
+    else if (corner === 'top-right') { state.logo.xPct = 1 - margin - halfW; state.logo.yPct = marginV + halfH; }
+    else if (corner === 'bottom-left') { state.logo.xPct = margin + halfW; state.logo.yPct = 1 - marginV - halfH; }
+    else if (corner === 'bottom-right') { state.logo.xPct = 1 - margin - halfW; state.logo.yPct = 1 - marginV - halfH; }
     else { state.logo.xPct = 0.5; state.logo.yPct = 0.5; } // 'center'
 
     // safety net: guarantees every preset (including a logo too big for its
@@ -1061,21 +1097,24 @@
   }
 
   // clamp the logo's center x so its left/right edges never cross the same
-  // margin used by the text block; y is only kept fully inside the canvas
-  function clampLogoPosition(xPct, yPct) {
+  // margin used by the text block, at any logo size
+  function getLogoBounds() {
     const sizeFrac = state.logo.sizePct / 100;
     const halfW = sizeFrac / 2;
     const aspect = state.logo.img ? state.logo.img.naturalHeight / state.logo.img.naturalWidth : 1;
     const halfH = (sizeFrac * aspect) / 2 * (state.canvasW / state.canvasH);
+    return {
+      minX: state.marginFrac + halfW,
+      maxX: 1 - state.marginFrac - halfW,
+      minY: state.marginVFrac + halfH,
+      maxY: 1 - state.marginVFrac - halfH,
+    };
+  }
 
-    const minX = state.marginFrac + halfW;
-    const maxX = 1 - state.marginFrac - halfW;
+  function clampLogoPosition(xPct, yPct) {
+    const { minX, maxX, minY, maxY } = getLogoBounds();
     const clampedX = minX <= maxX ? Math.min(maxX, Math.max(minX, xPct)) : 0.5;
-
-    const minY = halfH;
-    const maxY = 1 - halfH;
     const clampedY = minY <= maxY ? Math.min(maxY, Math.max(minY, yPct)) : 0.5;
-
     return { xPct: clampedX, yPct: clampedY };
   }
 
@@ -1135,6 +1174,7 @@
   function drawLogoGuides(W, H) {
     if (!showLogoGuides) return;
     const marginPx = W * state.marginFrac;
+    const marginVPx = H * state.marginVFrac;
     ctx.save();
     ctx.strokeStyle = 'rgba(108,99,255,0.9)';
     ctx.lineWidth = Math.max(2, W * 0.002);
@@ -1143,6 +1183,12 @@
       ctx.beginPath();
       ctx.moveTo(x, 0);
       ctx.lineTo(x, H);
+      ctx.stroke();
+    });
+    [marginVPx, H - marginVPx].forEach((y) => {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
       ctx.stroke();
     });
     ctx.restore();
@@ -1187,6 +1233,7 @@
     const W = state.canvasW, H = state.canvasH;
     const textBounds = paintComposite(W, H, true);
     updateLegibilityBanner(W, H, textBounds);
+    logoVPos.value = yPctToLogoVPosValue(state.logo.yPct);
     scheduleSaveRecipe();
   }
 
@@ -1499,6 +1546,9 @@
 
     marginSlider.value = Math.round(state.marginFrac * 100);
     marginVal.textContent = `${marginSlider.value}%`;
+    marginVSlider.value = Math.round(state.marginVFrac * 100);
+    marginVVal.textContent = `${marginVSlider.value}%`;
+    logoVPos.value = yPctToLogoVPosValue(state.logo.yPct);
 
     imageZoom.value = Math.round(state.imageTransform.zoom * 100);
     imageZoomVal.textContent = `${imageZoom.value}%`;
