@@ -21,8 +21,10 @@
   ];
 
   // continuous fade-speed slider (0=slow/gradual, 100=fast/early-solid), mapped
-  // linearly across the plateau_k range from the spec (slow=0.6 ... fast=0.18)
-  const PLATEAU_SLOW = 0.6;
+  // linearly across the plateau_k range. At PLATEAU_SLOW=1.0 the smoothstep
+  // eases across the *entire* reach zone with no flat solid tail at all --
+  // the softest the gradient can possibly be for a given reach.
+  const PLATEAU_SLOW = 1.0;
   const PLATEAU_FAST = 0.18;
   function speedValueToPlateauK(value) {
     return PLATEAU_SLOW + (PLATEAU_FAST - PLATEAU_SLOW) * (value / 100);
