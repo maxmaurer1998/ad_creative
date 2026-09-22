@@ -33,8 +33,7 @@
     return 'Fast';
   }
 
-  // logo horizontal drag is clamped to the same margin used by the text block
-  const TEXT_MARGIN_FRAC = 0.08;
+  const DEFAULT_MARGIN_FRAC = 0.08;
 
   const LS_KEY = 'adcreative.prefs.v1';
 
@@ -45,6 +44,7 @@
     canvasW: 1080,
     canvasH: 1350,
     safeZone: false,
+    marginFrac: DEFAULT_MARGIN_FRAC, // left/right margin, shared by text wrap and logo drag clamp
     image: null,   // HTMLImageElement
     logo: {
       img: null,
@@ -52,6 +52,7 @@
       yPct: 0.88,   // center y, fraction of canvas height
       sizePct: 18,  // width as % of canvas width
       manuallyPositioned: false,
+      matchFadeColor: false,
     },
     fade: {
       direction: 'bottom',
@@ -174,6 +175,22 @@
   logoSize.addEventListener('input', () => {
     state.logo.sizePct = Number(logoSize.value);
     logoSizeVal.textContent = `${state.logo.sizePct}%`;
+    const clamped = clampLogoPosition(state.logo.xPct, state.logo.yPct);
+    state.logo.xPct = clamped.xPct;
+    state.logo.yPct = clamped.yPct;
+    render();
+  });
+
+  document.getElementById('logoMatchFade').addEventListener('change', (e) => {
+    state.logo.matchFadeColor = e.target.checked;
+    render();
+  });
+
+  const marginSlider = document.getElementById('marginSlider');
+  const marginVal = document.getElementById('marginVal');
+  marginSlider.addEventListener('input', () => {
+    state.marginFrac = Number(marginSlider.value) / 100;
+    marginVal.textContent = `${marginSlider.value}%`;
     const clamped = clampLogoPosition(state.logo.xPct, state.logo.yPct);
     state.logo.xPct = clamped.xPct;
     state.logo.yPct = clamped.yPct;
@@ -372,7 +389,7 @@
   }
 
   function buildTextBlock(W, H) {
-    const margin = W * 0.08;
+    const margin = W * state.marginFrac;
     const maxWidth = W - margin * 2;
     const layerGap = H * 0.015;
     const lineGapFactor = 1.18;
@@ -429,7 +446,7 @@
   // ---------- logo drawing ----------
 
   function applyLogoCorner(corner) {
-    const margin = TEXT_MARGIN_FRAC;
+    const margin = state.marginFrac;
     const sizeFrac = state.logo.sizePct / 100;
     const halfW = sizeFrac / 2;
     const aspect = state.logo.img ? state.logo.img.naturalHeight / state.logo.img.naturalWidth : 1;
@@ -449,8 +466,8 @@
     const aspect = state.logo.img ? state.logo.img.naturalHeight / state.logo.img.naturalWidth : 1;
     const halfH = (sizeFrac * aspect) / 2 * (state.canvasW / state.canvasH);
 
-    const minX = TEXT_MARGIN_FRAC + halfW;
-    const maxX = 1 - TEXT_MARGIN_FRAC - halfW;
+    const minX = state.marginFrac + halfW;
+    const maxX = 1 - state.marginFrac - halfW;
     const clampedX = minX <= maxX ? Math.min(maxX, Math.max(minX, xPct)) : 0.5;
 
     const minY = halfH;
@@ -480,10 +497,33 @@
     return { x: cx - w / 2, y: cy - h / 2, w, h };
   }
 
+  // caches the last tinted version of the logo so we don't re-tint every frame
+  let tintCache = { img: null, color: null, canvas: null };
+
+  function getTintedLogo(img, color) {
+    if (tintCache.img === img && tintCache.color === color) return tintCache.canvas;
+    const off = document.createElement('canvas');
+    off.width = img.naturalWidth;
+    off.height = img.naturalHeight;
+    const octx = off.getContext('2d');
+    octx.drawImage(img, 0, 0);
+    // source-in keeps the logo's existing alpha as a mask and replaces the
+    // colour underneath it -- this only works well for a flat/silhouette
+    // logo, since any original colour variation is discarded
+    octx.globalCompositeOperation = 'source-in';
+    octx.fillStyle = color;
+    octx.fillRect(0, 0, off.width, off.height);
+    tintCache = { img, color, canvas: off };
+    return off;
+  }
+
   function drawLogo(W, H) {
     if (!state.logo.img) return;
     const r = logoRect(W, H);
-    ctx.drawImage(state.logo.img, r.x, r.y, r.w, r.h);
+    const source = state.logo.matchFadeColor
+      ? getTintedLogo(state.logo.img, state.fade.color)
+      : state.logo.img;
+    ctx.drawImage(source, r.x, r.y, r.w, r.h);
   }
 
   // ---------- logo margin guide lines (shown while dragging) ----------
@@ -492,7 +532,7 @@
 
   function drawLogoGuides(W, H) {
     if (!showLogoGuides) return;
-    const marginPx = W * TEXT_MARGIN_FRAC;
+    const marginPx = W * state.marginFrac;
     ctx.save();
     ctx.strokeStyle = 'rgba(108,99,255,0.9)';
     ctx.lineWidth = Math.max(2, W * 0.002);
@@ -679,6 +719,9 @@
     document.getElementById('fadeColor').value = state.fade.color;
     fadeSpeed.value = state.fade.speed;
     fadeSpeedVal.textContent = speedValueToLabel(state.fade.speed);
+    document.getElementById('logoMatchFade').checked = state.logo.matchFadeColor;
+    marginSlider.value = Math.round(state.marginFrac * 100);
+    marginVal.textContent = `${marginSlider.value}%`;
 
     presetSelect.value = state.preset;
     applyPreset(state.preset);
