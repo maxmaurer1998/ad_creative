@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ad-creative-v3';
+const CACHE_NAME = 'ad-creative-v4';
 
 const PRECACHE_URLS = [
   './',
@@ -58,7 +58,13 @@ self.addEventListener('fetch', (event) => {
 
   if (isCoreAppFile(event.request, url)) {
     event.respondWith(
-      fetch(event.request)
+      // 'no-store' bypasses the browser's own HTTP cache underneath this
+      // fetch, not just the Cache Storage API above -- without it, a
+      // network-first strategy can still transparently be served a stale
+      // response by the browser's ordinary HTTP caching layer, which is
+      // exactly the kind of "I pushed a fix but can't see it" gap this
+      // whole network-first setup exists to close.
+      fetch(event.request, { cache: 'no-store' })
         .then((response) => {
           const copy = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
