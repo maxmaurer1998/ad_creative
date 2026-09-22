@@ -25,10 +25,11 @@ For the "Add to Home Screen" / installable PWA behaviour and the Web Share API "
 - A persistent "default logo" (separate from the working session) that's saved once and then loads automatically in future sessions, surviving "Clear saved session"
 - Adjustable side margin, shared by the text block width and the logo drag clamp
 - Story/Reels safe-zone overlay toggle
-- Export at full canvas resolution as PNG, via the Web Share API where supported (native "Save to Photos" sheet) with a download-link fallback
+- Export renders at up to the photo's own native resolution (not capped at the on-screen preset size), with high-quality resampling and no in-app-only guides (safe zone, logo drag guides) ever baked in — via the Web Share API where supported (native "Save to Photos" sheet) with a download-link fallback
 - Installable PWA: manifest + service worker precaching the app shell and self-hosted fonts for offline use, with network-first HTML so updates show up automatically
-- Full session auto-save in IndexedDB — the uploaded photo, the logo, and every setting persist in the browser and are restored on reopen; "Clear saved session" wipes the current working state back to a blank start (saved default logo and recipe templates are kept)
+- Full session auto-save in IndexedDB — the uploaded photo, the logo, and every setting persist in the browser and are restored on reopen; "Clear saved session" wipes the current working state back to a blank start (saved default logo, recipe templates, and the project library are kept)
 - A named recipe/template library: save the current fade/text/logo setup (not the photo) under a name, and re-apply it later to a different photo
+- A project library: nested folders (e.g. Advertising → Top of funnel) holding fully saved projects — photo, logo, and every setting — that can be reopened and tweaked later, browsable from a "Library" button in the header
 
 ## Fonts
 

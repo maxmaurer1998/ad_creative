@@ -96,9 +96,11 @@
   // ---------- persistence (IndexedDB: session "recipe" + photo/logo blobs + a named recipe library) ----------
 
   const IDB_NAME = 'adcreative-db';
-  const IDB_VERSION = 2;
-  const IDB_STORE_KV = 'kv';           // session state: recipe / photoBlob / logoBlob / savedLogo
-  const IDB_STORE_RECIPES = 'recipes'; // named recipe templates, keyed by name
+  const IDB_VERSION = 3;
+  const IDB_STORE_KV = 'kv';             // session state: recipe / photoBlob / logoBlob / savedLogo / imageTransform
+  const IDB_STORE_RECIPES = 'recipes';   // named recipe templates, keyed by name
+  const IDB_STORE_FOLDERS = 'folders';   // { id, parentId, name, createdAt }
+  const IDB_STORE_PROJECTS = 'projects'; // { id, folderId, name, recipe, imageTransform, photoBlob, logoBlob, thumbnailBlob, updatedAt }
 
   function idbOpen() {
     return new Promise((resolve, reject) => {
@@ -108,6 +110,8 @@
         const db = req.result;
         if (!db.objectStoreNames.contains(IDB_STORE_KV)) db.createObjectStore(IDB_STORE_KV);
         if (!db.objectStoreNames.contains(IDB_STORE_RECIPES)) db.createObjectStore(IDB_STORE_RECIPES);
+        if (!db.objectStoreNames.contains(IDB_STORE_FOLDERS)) db.createObjectStore(IDB_STORE_FOLDERS, { keyPath: 'id' });
+        if (!db.objectStoreNames.contains(IDB_STORE_PROJECTS)) db.createObjectStore(IDB_STORE_PROJECTS, { keyPath: 'id' });
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -160,6 +164,43 @@
         req.onerror = () => reject(req.error);
       });
     } catch (e) { return []; }
+  }
+
+  // for stores created with a keyPath (folders/projects) -- the key lives
+  // inside the value itself, so it must NOT be passed separately
+  async function idbPut(store, value) {
+    try {
+      const db = await idbOpen();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(store, 'readwrite');
+        tx.objectStore(store).put(value);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  async function idbGetAllValues(store) {
+    try {
+      const db = await idbOpen();
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(store, 'readonly');
+        const req = tx.objectStore(store).getAll();
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    } catch (e) { return []; }
+  }
+
+  function makeId() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
   }
 
   // maps the old 3-way top/middle/bottom toggle to the new continuous 0-100 slider
@@ -369,6 +410,235 @@
     await idbDelete(IDB_STORE_RECIPES, name);
     await refreshRecipeList();
   });
+
+  // ---------- project library: nested folders of saved projects (photo + logo + full recipe) ----------
+
+  const libraryOverlay = document.getElementById('libraryOverlay');
+  const libraryList = document.getElementById('libraryList');
+  const libraryBreadcrumb = document.getElementById('libraryBreadcrumb');
+  const libraryBackBtn = document.getElementById('libraryBackBtn');
+
+  let libraryCurrentFolderId = null; // null = root
+  let libraryPath = []; // [{ id, name }, ...]
+  let libraryObjectUrls = [];
+
+  function revokeLibraryObjectUrls() {
+    libraryObjectUrls.forEach((url) => URL.revokeObjectURL(url));
+    libraryObjectUrls = [];
+  }
+
+  async function loadFolderChildren(parentId) {
+    const [allFolders, allProjects] = await Promise.all([
+      idbGetAllValues(IDB_STORE_FOLDERS),
+      idbGetAllValues(IDB_STORE_PROJECTS),
+    ]);
+    const folders = allFolders.filter((f) => f.parentId === parentId).sort((a, b) => a.name.localeCompare(b.name));
+    const projects = allProjects.filter((p) => p.folderId === parentId).sort((a, b) => b.updatedAt - a.updatedAt);
+    return { folders, projects };
+  }
+
+  async function deleteFolderRecursive(folderId) {
+    const [allFolders, allProjects] = await Promise.all([
+      idbGetAllValues(IDB_STORE_FOLDERS),
+      idbGetAllValues(IDB_STORE_PROJECTS),
+    ]);
+    for (const child of allFolders.filter((f) => f.parentId === folderId)) {
+      await deleteFolderRecursive(child.id);
+    }
+    for (const proj of allProjects.filter((p) => p.folderId === folderId)) {
+      await idbDelete(IDB_STORE_PROJECTS, proj.id);
+    }
+    await idbDelete(IDB_STORE_FOLDERS, folderId);
+  }
+
+  async function renderLibrary() {
+    revokeLibraryObjectUrls();
+    const { folders, projects } = await loadFolderChildren(libraryCurrentFolderId);
+
+    libraryBackBtn.disabled = libraryPath.length === 0;
+    libraryBreadcrumb.textContent = libraryPath.length ? `Home / ${libraryPath.map((p) => p.name).join(' / ')}` : 'Home';
+
+    libraryList.innerHTML = '';
+
+    if (folders.length === 0 && projects.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'hint-text';
+      empty.textContent = 'Nothing here yet. Create a folder, or save the project you\'re working on into this one.';
+      libraryList.appendChild(empty);
+    }
+
+    for (const folder of folders) {
+      const row = document.createElement('div');
+      row.className = 'library-row';
+      row.innerHTML = `
+        <span class="library-row-icon">📁</span>
+        <span class="library-row-name" role="button">${escapeHtml(folder.name)}</span>
+        <button class="library-row-btn" data-action="rename-folder" data-id="${folder.id}">Rename</button>
+        <button class="library-row-btn" data-action="delete-folder" data-id="${folder.id}">Delete</button>
+      `;
+      row.querySelector('.library-row-name').addEventListener('click', () => {
+        libraryPath.push({ id: folder.id, name: folder.name });
+        libraryCurrentFolderId = folder.id;
+        renderLibrary();
+      });
+      libraryList.appendChild(row);
+    }
+
+    for (const project of projects) {
+      const row = document.createElement('div');
+      row.className = 'library-row';
+      let thumbHtml = '<div class="library-thumb library-thumb-empty"></div>';
+      if (project.thumbnailBlob) {
+        const url = URL.createObjectURL(project.thumbnailBlob);
+        libraryObjectUrls.push(url);
+        thumbHtml = `<img class="library-thumb" src="${url}" alt="" />`;
+      }
+      row.innerHTML = `
+        ${thumbHtml}
+        <span class="library-row-name" role="button">${escapeHtml(project.name)}</span>
+        <button class="library-row-btn" data-action="rename-project" data-id="${project.id}">Rename</button>
+        <button class="library-row-btn" data-action="delete-project" data-id="${project.id}">Delete</button>
+      `;
+      row.querySelector('.library-row-name').addEventListener('click', () => openProject(project.id));
+      libraryList.appendChild(row);
+    }
+
+    libraryList.querySelectorAll('.library-row-btn').forEach((btn) => {
+      btn.addEventListener('click', () => handleLibraryRowAction(btn.dataset.action, btn.dataset.id));
+    });
+  }
+
+  async function handleLibraryRowAction(action, id) {
+    if (action === 'rename-folder') {
+      const folder = await idbGet(IDB_STORE_FOLDERS, id);
+      if (!folder) return;
+      const name = prompt('Rename folder:', folder.name);
+      if (!name || !name.trim()) return;
+      folder.name = name.trim();
+      await idbPut(IDB_STORE_FOLDERS, folder);
+      renderLibrary();
+    } else if (action === 'delete-folder') {
+      const ok = confirm("Delete this folder and everything inside it (subfolders and saved projects)?\n\nThis can't be undone.");
+      if (!ok) return;
+      await deleteFolderRecursive(id);
+      renderLibrary();
+    } else if (action === 'rename-project') {
+      const project = await idbGet(IDB_STORE_PROJECTS, id);
+      if (!project) return;
+      const name = prompt('Rename project:', project.name);
+      if (!name || !name.trim()) return;
+      project.name = name.trim();
+      await idbPut(IDB_STORE_PROJECTS, project);
+      renderLibrary();
+    } else if (action === 'delete-project') {
+      const ok = confirm("Delete this saved project?\n\nThis can't be undone.");
+      if (!ok) return;
+      await idbDelete(IDB_STORE_PROJECTS, id);
+      renderLibrary();
+    }
+  }
+
+  function makeThumbnail() {
+    return new Promise((resolve) => {
+      const thumbW = 320;
+      const thumbH = Math.round(thumbW * (state.canvasH / state.canvasW));
+      const off = document.createElement('canvas');
+      off.width = thumbW;
+      off.height = thumbH;
+      const octx = off.getContext('2d');
+      octx.imageSmoothingEnabled = true;
+      octx.imageSmoothingQuality = 'high';
+      octx.drawImage(canvas, 0, 0, thumbW, thumbH); // from the already-rendered live preview canvas
+      off.toBlob((blob) => resolve(blob), 'image/jpeg', 0.82);
+    });
+  }
+
+  async function saveProjectToCurrentFolder() {
+    if (!state.image) { alert('Upload a photo first.'); return; }
+    const name = prompt('Name this project:');
+    if (!name || !name.trim()) return;
+
+    const thumbnailBlob = await makeThumbnail();
+    const photoBlob = await idbGet(IDB_STORE_KV, 'photoBlob');
+    let logoBlob = null;
+    if (state.logo.img) {
+      logoBlob = (await idbGet(IDB_STORE_KV, 'logoBlob')) || (await idbGet(IDB_STORE_KV, 'savedLogo')) || null;
+    }
+
+    const project = {
+      id: makeId(),
+      folderId: libraryCurrentFolderId,
+      name: name.trim(),
+      recipe: serializeRecipe(),
+      imageTransform: { ...state.imageTransform },
+      photoBlob: photoBlob || null,
+      logoBlob,
+      thumbnailBlob,
+      updatedAt: Date.now(),
+    };
+    await idbPut(IDB_STORE_PROJECTS, project);
+    renderLibrary();
+  }
+
+  async function openProject(id) {
+    const project = await idbGet(IDB_STORE_PROJECTS, id);
+    if (!project) return;
+
+    if (project.photoBlob) {
+      const img = await loadImageFromBlob(project.photoBlob);
+      if (img) {
+        state.image = img;
+        dropHint.classList.add('hidden');
+        exportBtn.disabled = false;
+      }
+    } else {
+      state.image = null;
+      dropHint.classList.remove('hidden');
+      exportBtn.disabled = true;
+    }
+
+    state.logo.img = project.logoBlob ? await loadImageFromBlob(project.logoBlob) : null;
+
+    if (project.recipe) applyRecipeToState(project.recipe);
+    if (project.imageTransform && typeof project.imageTransform.zoom === 'number') {
+      state.imageTransform = project.imageTransform;
+    } else {
+      state.imageTransform = { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5 };
+    }
+
+    syncAllControlsFromState();
+    applyPreset(state.preset);
+    render();
+    closeLibrary();
+  }
+
+  function openLibrary() {
+    libraryCurrentFolderId = null;
+    libraryPath = [];
+    libraryOverlay.classList.remove('hidden');
+    renderLibrary();
+  }
+
+  function closeLibrary() {
+    revokeLibraryObjectUrls();
+    libraryOverlay.classList.add('hidden');
+  }
+
+  document.getElementById('libraryBtn').addEventListener('click', openLibrary);
+  document.getElementById('libraryCloseBtn').addEventListener('click', closeLibrary);
+  document.getElementById('libraryBackBtn').addEventListener('click', () => {
+    if (libraryPath.length === 0) return;
+    libraryPath.pop();
+    libraryCurrentFolderId = libraryPath.length ? libraryPath[libraryPath.length - 1].id : null;
+    renderLibrary();
+  });
+  document.getElementById('libraryNewFolderBtn').addEventListener('click', async () => {
+    const name = prompt('New folder name:');
+    if (!name || !name.trim()) return;
+    await idbPut(IDB_STORE_FOLDERS, { id: makeId(), parentId: libraryCurrentFolderId, name: name.trim(), createdAt: Date.now() });
+    renderLibrary();
+  });
+  document.getElementById('librarySaveHereBtn').addEventListener('click', saveProjectToCurrentFolder);
 
   // legacy fallback: versions before session-save only kept font/colour in localStorage
   function loadPrefs() {

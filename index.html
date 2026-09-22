@@ -22,7 +22,10 @@
  <div class="main-col">
   <header class="topbar">
     <h1>Ad Creative</h1>
-    <button id="exportBtn" class="btn btn-primary" disabled>Export</button>
+    <div class="topbar-actions">
+      <button id="libraryBtn" class="btn btn-secondary">Library</button>
+      <button id="exportBtn" class="btn btn-primary" disabled>Export</button>
+    </div>
   </header>
 
   <main class="stage-wrap">
@@ -268,6 +271,19 @@
     </div>
 
   </section>
+</div>
+
+<div id="libraryOverlay" class="library-overlay hidden">
+  <div class="library-header">
+    <button id="libraryBackBtn" class="btn btn-secondary" disabled>← Back</button>
+    <div id="libraryBreadcrumb" class="library-breadcrumb">Home</div>
+    <button id="libraryCloseBtn" class="btn btn-secondary">✕</button>
+  </div>
+  <div class="library-actions">
+    <button id="libraryNewFolderBtn" class="btn btn-secondary">+ New folder</button>
+    <button id="librarySaveHereBtn" class="btn btn-primary">Save project here</button>
+  </div>
+  <div id="libraryList" class="library-list"></div>
 </div>
 
 <script src="app.js"></script>

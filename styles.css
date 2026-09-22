@@ -56,6 +56,12 @@ html, body {
   z-index: 20;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .topbar h1 {
   font-size: 17px;
   font-weight: 600;
@@ -89,6 +95,10 @@ html, body {
   background: var(--panel-bg-2);
   color: var(--text);
   border: 1px solid var(--border);
+}
+.btn-secondary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .stage-wrap {
@@ -364,6 +374,103 @@ input[type="checkbox"] {
   touch-action: none;
 }
 .logo-handle:active { cursor: grabbing; }
+
+/* ---------- project library overlay ---------- */
+
+.library-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+}
+.library-overlay.hidden { display: none; }
+
+.library-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.library-breadcrumb {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-actions {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.library-actions .btn { flex: 1; }
+
+.library-list {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px 16px calc(16px + var(--safe-bottom));
+}
+
+.library-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.library-row-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+.library-thumb {
+  width: 44px;
+  height: 55px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+  background: var(--panel-bg-2);
+}
+.library-thumb-empty {
+  border: 1px solid var(--border);
+}
+
+.library-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.library-row-btn {
+  background: var(--panel-bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
 
 @media (min-width: 820px) {
   .stage-wrap { padding: 24px; }
