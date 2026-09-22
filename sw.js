@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ad-creative-v2';
+const CACHE_NAME = 'ad-creative-v3';
 
 const PRECACHE_URLS = [
   './',
@@ -40,14 +40,23 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// core app files that must always match each other and the current code --
+// these go network-first so a stale cached app.js can never get paired with
+// a fresh index.html (which is exactly what caused a real breakage: an old
+// cached app.js referencing DOM that a newer index.html no longer has,
+// throwing and halting script execution before event listeners attached).
+// Only the rarely-changing, expensive-to-refetch assets (fonts, icons) stay
+// cache-first.
+function isCoreAppFile(request, url) {
+  if (request.mode === 'navigate') return true;
+  return /\.(js|css)$/.test(url.pathname) || url.pathname.endsWith('/manifest.webmanifest');
+}
+
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  const url = new URL(event.request.url);
 
-  // Page navigations (loading index.html) go network-first, so a change on
-  // the server shows up the moment you're online -- falling back to the
-  // cached shell only when offline. Everything else (fonts, icons, css/js
-  // referenced by that fresh HTML) stays cache-first for offline/speed.
-  if (event.request.mode === 'navigate') {
+  if (isCoreAppFile(event.request, url)) {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
@@ -55,7 +64,7 @@ self.addEventListener('fetch', (event) => {
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
           return response;
         })
-        .catch(() => caches.match(event.request).then((cached) => cached || caches.match('./index.html')))
+        .catch(() => caches.match(event.request).then((cached) => cached || (event.request.mode === 'navigate' ? caches.match('./index.html') : undefined)))
     );
     return;
   }
