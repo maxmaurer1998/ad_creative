@@ -35,7 +35,7 @@
 
   const DEFAULT_MARGIN_FRAC = 0.08;
 
-  const LS_KEY = 'adcreative.prefs.v1';
+  const LS_KEY = 'adcreative.prefs.v1'; // legacy, read-only fallback for pre-session-save versions
 
   // ---------- state ----------
 
@@ -85,8 +85,162 @@
   const safeZoneRow = document.getElementById('safeZoneRow');
   const safeZoneToggle = document.getElementById('safeZoneToggle');
 
-  // ---------- prefs (localStorage nice-to-have) ----------
+  // ---------- session persistence (IndexedDB: settings "recipe" + the actual photo/logo images) ----------
 
+  const IDB_NAME = 'adcreative-db';
+  const IDB_STORE = 'kv';
+
+  function idbOpen() {
+    return new Promise((resolve, reject) => {
+      if (!('indexedDB' in window)) { reject(new Error('no indexedDB')); return; }
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = () => { req.result.createObjectStore(IDB_STORE); };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function idbSet(key, value) {
+    try {
+      const db = await idbOpen();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, 'readwrite');
+        tx.objectStore(IDB_STORE).put(value, key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch (e) { /* IndexedDB unavailable (private browsing, quota, etc.) - ignore */ }
+  }
+
+  async function idbGet(key) {
+    try {
+      const db = await idbOpen();
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, 'readonly');
+        const req = tx.objectStore(IDB_STORE).get(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    } catch (e) { return undefined; }
+  }
+
+  async function idbClearAll() {
+    try {
+      const db = await idbOpen();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, 'readwrite');
+        tx.objectStore(IDB_STORE).clear();
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  // the "recipe": every setting except the actual images, which are stored separately as blobs
+  function serializeRecipe() {
+    return {
+      v: 1,
+      preset: state.preset,
+      safeZone: state.safeZone,
+      marginFrac: state.marginFrac,
+      fade: { ...state.fade },
+      text: {
+        hAlign: state.text.hAlign,
+        vAlign: state.text.vAlign,
+        layers: {
+          headline: { ...state.text.layers.headline },
+          subheader: { ...state.text.layers.subheader },
+          other: { ...state.text.layers.other },
+        },
+      },
+      logo: {
+        xPct: state.logo.xPct,
+        yPct: state.logo.yPct,
+        sizePct: state.logo.sizePct,
+        manuallyPositioned: state.logo.manuallyPositioned,
+        matchFadeColor: state.logo.matchFadeColor,
+      },
+    };
+  }
+
+  function applyRecipeToState(recipe) {
+    if (!recipe) return;
+    if (recipe.preset && PRESETS[recipe.preset]) state.preset = recipe.preset;
+    if (typeof recipe.safeZone === 'boolean') state.safeZone = recipe.safeZone;
+    if (typeof recipe.marginFrac === 'number') state.marginFrac = recipe.marginFrac;
+    if (recipe.fade) Object.assign(state.fade, recipe.fade);
+    if (recipe.text) {
+      if (recipe.text.hAlign) state.text.hAlign = recipe.text.hAlign;
+      if (recipe.text.vAlign) state.text.vAlign = recipe.text.vAlign;
+      if (recipe.text.layers) {
+        for (const k of ['headline', 'subheader', 'other']) {
+          if (recipe.text.layers[k]) Object.assign(state.text.layers[k], recipe.text.layers[k]);
+        }
+      }
+    }
+    if (recipe.logo) {
+      const { xPct, yPct, sizePct, manuallyPositioned, matchFadeColor } = recipe.logo;
+      if (typeof xPct === 'number') state.logo.xPct = xPct;
+      if (typeof yPct === 'number') state.logo.yPct = yPct;
+      if (typeof sizePct === 'number') state.logo.sizePct = sizePct;
+      if (typeof manuallyPositioned === 'boolean') state.logo.manuallyPositioned = manuallyPositioned;
+      if (typeof matchFadeColor === 'boolean') state.logo.matchFadeColor = matchFadeColor;
+    }
+  }
+
+  let saveRecipeTimer = null;
+  function scheduleSaveRecipe() {
+    clearTimeout(saveRecipeTimer);
+    saveRecipeTimer = setTimeout(() => { idbSet('recipe', serializeRecipe()); }, 400);
+  }
+
+  function loadImageFromBlob(blob) {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => { resolve(img); URL.revokeObjectURL(url); };
+      img.onerror = () => resolve(null);
+      img.src = url;
+    });
+  }
+
+  async function restoreSession() {
+    const [recipe, photoBlob, logoBlob] = await Promise.all([
+      idbGet('recipe'),
+      idbGet('photoBlob'),
+      idbGet('logoBlob'),
+    ]);
+
+    if (recipe) applyRecipeToState(recipe);
+
+    if (photoBlob) {
+      const img = await loadImageFromBlob(photoBlob);
+      if (img) {
+        state.image = img;
+        dropHint.classList.add('hidden');
+        exportBtn.disabled = false;
+      }
+    }
+    if (logoBlob) {
+      const img = await loadImageFromBlob(logoBlob);
+      if (img) state.logo.img = img;
+    }
+
+    return { hasRecipe: !!recipe };
+  }
+
+  async function clearSavedSession() {
+    await idbClearAll();
+    try { localStorage.removeItem(LS_KEY); } catch (e) { /* ignore */ }
+    location.reload();
+  }
+
+  document.getElementById('clearSessionBtn').addEventListener('click', () => {
+    const ok = confirm("Clear your saved photo, logo, and settings from this browser?\n\nThis can't be undone.");
+    if (ok) clearSavedSession();
+  });
+
+  // legacy fallback: versions before session-save only kept font/colour in localStorage
   function loadPrefs() {
     try {
       const raw = localStorage.getItem(LS_KEY);
@@ -99,19 +253,6 @@
         }
       }
     } catch (e) { /* ignore corrupt prefs */ }
-  }
-
-  function savePrefs() {
-    try {
-      localStorage.setItem(LS_KEY, JSON.stringify({
-        fadeColor: state.fade.color,
-        layers: {
-          headline: { font: state.text.layers.headline.font, color: state.text.layers.headline.color },
-          subheader: { font: state.text.layers.subheader.font, color: state.text.layers.subheader.color },
-          other: { font: state.text.layers.other.font, color: state.text.layers.other.color },
-        },
-      }));
-    } catch (e) { /* storage unavailable */ }
   }
 
   // ---------- tab / panel switching ----------
@@ -167,7 +308,6 @@
   document.getElementById('fadeColor').addEventListener('input', (e) => {
     state.fade.color = e.target.value;
     render();
-    savePrefs();
   });
 
   const logoSize = document.getElementById('logoSize');
@@ -225,20 +365,24 @@
     populateFontSelect(fontEl);
 
     const l = state.text.layers[layerKey];
-    textEl.value = l.text;
-    fontEl.value = l.font;
-    sizeEl.value = l.size;
-    sizeValEl.textContent = `${l.size}px`;
-    colorEl.value = l.color;
-
     textEl.addEventListener('input', () => { l.text = textEl.value; render(); });
-    fontEl.addEventListener('change', () => { l.font = fontEl.value; render(); savePrefs(); });
+    fontEl.addEventListener('change', () => { l.font = fontEl.value; render(); });
     sizeEl.addEventListener('input', () => {
       l.size = Number(sizeEl.value);
       sizeValEl.textContent = `${l.size}px`;
       render();
     });
-    colorEl.addEventListener('input', () => { l.color = colorEl.value; render(); savePrefs(); });
+    colorEl.addEventListener('input', () => { l.color = colorEl.value; render(); });
+  }
+
+  function syncLayerPanel(layerKey) {
+    const panel = document.getElementById(`layer-${layerKey}`);
+    const l = state.text.layers[layerKey];
+    panel.querySelector('.layer-text').value = l.text;
+    panel.querySelector('.layer-font').value = l.font;
+    panel.querySelector('.layer-size').value = l.size;
+    panel.querySelector('.layer-size-val').textContent = `${l.size}px`;
+    panel.querySelector('.layer-color').value = l.color;
   }
 
   // ---------- preset / canvas sizing ----------
@@ -276,6 +420,7 @@
       exportBtn.disabled = false;
       render();
     });
+    idbSet('photoBlob', file);
   });
 
   logoInput.addEventListener('change', () => {
@@ -285,6 +430,7 @@
       state.logo.img = img;
       render();
     });
+    idbSet('logoBlob', file);
   });
 
   // ---------- fade drawing ----------
@@ -575,6 +721,7 @@
     drawSafeZone(W, H);
 
     updateLegibilityBanner(W, H, textBounds);
+    scheduleSaveRecipe();
   }
 
   function drawImageCover(img, W, H) {
@@ -711,21 +858,45 @@
 
   // ---------- init ----------
 
-  function init() {
-    loadPrefs();
+  function setSegmentedActive(containerId, val) {
+    document.querySelectorAll(`#${containerId} button`).forEach(b => b.classList.toggle('active', b.dataset.val === val));
+  }
 
-    ['headline', 'subheader', 'other'].forEach(wireLayerPanel);
+  function syncAllControlsFromState() {
+    ['headline', 'subheader', 'other'].forEach(syncLayerPanel);
     document.getElementById('otherEnabled').checked = state.text.layers.other.enabled;
-    document.getElementById('fadeColor').value = state.fade.color;
+
+    setSegmentedActive('fadeDirection', state.fade.direction);
+    setSegmentedActive('textHAlign', state.text.hAlign);
+    setSegmentedActive('textVAlign', state.text.vAlign);
+
+    fadeReach.value = state.fade.reach;
+    fadeReachVal.textContent = `${state.fade.reach}%`;
     fadeSpeed.value = state.fade.speed;
     fadeSpeedVal.textContent = speedValueToLabel(state.fade.speed);
+    document.getElementById('fadeColor').value = state.fade.color;
+
+    logoSize.value = state.logo.sizePct;
+    logoSizeVal.textContent = `${state.logo.sizePct}%`;
     document.getElementById('logoMatchFade').checked = state.logo.matchFadeColor;
+
     marginSlider.value = Math.round(state.marginFrac * 100);
     marginVal.textContent = `${marginSlider.value}%`;
 
+    safeZoneToggle.checked = state.safeZone;
     presetSelect.value = state.preset;
+  }
+
+  async function init() {
+    ['headline', 'subheader', 'other'].forEach(wireLayerPanel);
+
+    const { hasRecipe } = await restoreSession();
+    if (!hasRecipe) loadPrefs();
+
+    syncAllControlsFromState();
+
     applyPreset(state.preset);
-    applyLogoCorner('bottom-right');
+    if (!hasRecipe) applyLogoCorner('bottom-right');
 
     fitStageToViewport();
     render();

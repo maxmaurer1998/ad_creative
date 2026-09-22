@@ -20,11 +20,12 @@ For the "Add to Home Screen" / installable PWA behaviour and the Web Share API "
 - Fade overlay: direction (top/bottom), reach, speed, colour — using the smoothstep + plateau easing so the fade always blends to 0% opacity at its outer edge
 - Three independent text layers (headline, subheader, optional "other" line), each with font, size, colour; alignment (horizontal/vertical) applies to the stacked text block as a whole
 - Inline legibility warning banner when the text block sits over an insufficiently-faded area
-- Logo upload with drag-to-position on canvas and corner presets; size as % of canvas width
+- Logo upload with drag-to-position on canvas (clamped to the same side margin as the text, with guide lines while dragging) and corner presets; size as % of canvas width; optional "match fade colour" tint
+- Adjustable side margin, shared by the text block width and the logo drag clamp
 - Story/Reels safe-zone overlay toggle
 - Export at full canvas resolution as PNG, via the Web Share API where supported (native "Save to Photos" sheet) with a download-link fallback
 - Installable PWA: manifest + service worker precaching the app shell and self-hosted fonts for offline use
-- Remembers last-used font/colour choices via localStorage
+- Full session auto-save in IndexedDB — the uploaded photo, the logo, and every setting persist in the browser and are restored on reopen; "Clear saved session" wipes it back to a blank start
 
 ## Fonts
 
