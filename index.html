@@ -377,13 +377,23 @@
         <div class="segmented" id="filmStock">
           <button data-val="none" class="active">None</button>
           <button data-val="fuji">Fuji</button>
+          <button data-val="techOptics">Tech optics</button>
         </div>
       </div>
       <div class="control-row" id="filmStockIntensityRow" style="display:none;">
         <label for="filmStockIntensity">Strength <span id="filmStockIntensityVal">70%</span></label>
         <input type="range" id="filmStockIntensity" min="0" max="100" value="70" />
       </div>
+      <div class="control-row" id="techOpticsHudRow" style="display:none;">
+        <label for="techOpticsHud">HUD overlay</label>
+        <input type="checkbox" id="techOpticsHud" checked />
+      </div>
+      <div class="control-row" id="techOpticsHudTextRow" style="display:none;">
+        <label for="techOpticsHudText">HUD text</label>
+        <input type="text" id="techOpticsHudText" value="REF 0X-114 / LENS: IRIDIUM / MAT: X-ALLOY" />
+      </div>
       <p class="hint-text">A Fujifilm-inspired colour-grade recipe: lifted, faded shadows with a cool teal cast, a soft highlight roll-off with a warm amber cast, and gently muted saturation — the classic "Fuji" film look, independent of the warm-tone slider above.</p>
+      <p class="hint-text">"Tech optics" is a stylised late-'90s classified-hardware look: crushed blacks with a cold steel/silver split tone, chromatic aberration toward the frame edges, a chrome highlight bloom, fine grain, a cool anamorphic flare, a vignette, and an optional corner-bracket/grid/spec-text HUD (edit the text above to change the label).</p>
     </div>
 
   </section>

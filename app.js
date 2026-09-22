@@ -85,8 +85,10 @@
       grainSize: 25, // 0-100, particle size: 0=finest, 100=coarsest
       vignette: 0,  // 0-100, darkened edges
       warmth: 0,    // 0-100, warm "heritage" colour-grade overlay
-      filmStock: 'none', // 'none' | 'fuji'
+      filmStock: 'none', // 'none' | 'fuji' | 'techOptics'
       filmStockIntensity: 70, // 0-100, strength of the film-stock colour grade
+      techOpticsHud: true, // whether the Tech Optics corner-bracket/grid/spec-text overlay is shown
+      techOpticsHudText: 'REF 0X-114 / LENS: IRIDIUM / MAT: X-ALLOY',
     },
   };
 
@@ -834,9 +836,14 @@
   });
 
   const filmStockIntensityRow = document.getElementById('filmStockIntensityRow');
+  const techOpticsHudRow = document.getElementById('techOpticsHudRow');
+  const techOpticsHudTextRow = document.getElementById('techOpticsHudTextRow');
   wireSegmented('filmStock', (val) => {
     state.effects.filmStock = val;
     filmStockIntensityRow.style.display = val === 'none' ? 'none' : 'flex';
+    const showHud = val === 'techOptics';
+    techOpticsHudRow.style.display = showHud ? 'flex' : 'none';
+    techOpticsHudTextRow.style.display = showHud && state.effects.techOpticsHud ? 'flex' : 'none';
     render();
   });
 
@@ -845,6 +852,17 @@
   filmStockIntensity.addEventListener('input', () => {
     state.effects.filmStockIntensity = Number(filmStockIntensity.value);
     filmStockIntensityVal.textContent = `${state.effects.filmStockIntensity}%`;
+    render();
+  });
+
+  const techOpticsHudTextInput = document.getElementById('techOpticsHudText');
+  document.getElementById('techOpticsHud').addEventListener('change', (e) => {
+    state.effects.techOpticsHud = e.target.checked;
+    techOpticsHudTextRow.style.display = e.target.checked ? 'flex' : 'none';
+    render();
+  });
+  techOpticsHudTextInput.addEventListener('input', () => {
+    state.effects.techOpticsHudText = techOpticsHudTextInput.value;
     render();
   });
 
@@ -1134,6 +1152,7 @@
 
   const getFadeNoiseLayer = makeNoiseLayerCache();
   const getEffectsNoiseLayer = makeNoiseLayerCache();
+  const getTechOpticsNoiseLayer = makeNoiseLayerCache();
 
   function drawFade(W, H, fade) {
     const scrimH = H * (fade.reach / 100);
@@ -1254,10 +1273,235 @@
     ctx.putImageData(imageData, 0, 0);
   }
 
+  // ---------- "Tech Optics" -- a stylised late-'90s classified-hardware grade ----------
+  // Crushed blacks + cold steel/silver split toning, chromatic aberration that
+  // strengthens toward the frame edges, a chrome specular bloom on the
+  // brightest highlights, fine grain, a cool anamorphic flare, a vignette, and
+  // an optional corner-bracket/grid/spec-text HUD overlay. All pixel-space
+  // constants are defined against a 1080px-wide reference and scaled by the
+  // actual render width, matching how text-layer sizing already works, so the
+  // look stays consistent between the live preview and a hi-res export.
+  const TECH_OPTICS_PRESET = {
+    contrast: 1.35,
+    brightness: 0.95,
+    crushThreshold: 0.08, // luminance below this fades toward black
+    desaturate: 0.25,
+    shadowColor: [0x1c, 0x2a, 0x3a],   // steel blue
+    highlightColor: [0xdd, 0xe6, 0xee], // cold silver
+    splitStrength: 0.55,
+    aberrationPx: 2.5, // channel offset at the frame's horizontal edge
+    bloomThreshold: 0.8,
+    bloomBlurPx: 8,
+    bloomOpacity: 0.35,
+    grainOpacity: 0.08,
+    flareOpacity: 0.25,
+    vignetteOpacity: 0.4,
+  };
+
+  function techOpticsGradePixel(r0, g0, b0, preset) {
+    let r = (r0 / 255 - 0.5) * preset.contrast + 0.5;
+    let g = (g0 / 255 - 0.5) * preset.contrast + 0.5;
+    let b = (b0 / 255 - 0.5) * preset.contrast + 0.5;
+    r *= preset.brightness; g *= preset.brightness; b *= preset.brightness;
+
+    const lum1 = 0.299 * r + 0.587 * g + 0.114 * b;
+    if (lum1 < preset.crushThreshold && preset.crushThreshold > 0) {
+      const k = Math.max(0, lum1 / preset.crushThreshold);
+      const scale = k * k; // push shadow detail toward true black
+      r *= scale; g *= scale; b *= scale;
+    }
+
+    const lum2 = 0.299 * r + 0.587 * g + 0.114 * b;
+    r += (lum2 - r) * preset.desaturate;
+    g += (lum2 - g) * preset.desaturate;
+    b += (lum2 - b) * preset.desaturate;
+
+    const lum3 = 0.299 * r + 0.587 * g + 0.114 * b;
+    const shadowW = Math.max(0, Math.min(1, (0.35 - lum3) / 0.35)) * preset.splitStrength;
+    const highlightW = Math.max(0, Math.min(1, (lum3 - 0.65) / 0.35)) * preset.splitStrength;
+    if (shadowW > 0) {
+      r += (preset.shadowColor[0] / 255 - r) * shadowW;
+      g += (preset.shadowColor[1] / 255 - g) * shadowW;
+      b += (preset.shadowColor[2] / 255 - b) * shadowW;
+    }
+    if (highlightW > 0) {
+      r += (preset.highlightColor[0] / 255 - r) * highlightW;
+      g += (preset.highlightColor[1] / 255 - g) * highlightW;
+      b += (preset.highlightColor[2] / 255 - b) * highlightW;
+    }
+    return [r * 255, g * 255, b * 255];
+  }
+
+  // colour grade + chromatic aberration in one pass: the grade needs each
+  // pixel independently, but the aberration then needs to sample *neighbouring*
+  // graded pixels, so the graded buffer is built first and the shifted result
+  // is blended against the untouched source afterwards (so `amount` scales
+  // the whole combined effect, not just the grade).
+  function applyTechOpticsGradeAndAberration(W, H, preset, amount) {
+    const src = ctx.getImageData(0, 0, W, H);
+    const sd = src.data;
+    const graded = new Uint8ClampedArray(sd.length);
+    for (let i = 0; i < sd.length; i += 4) {
+      const [r, g, b] = techOpticsGradePixel(sd[i], sd[i + 1], sd[i + 2], preset);
+      graded[i] = r; graded[i + 1] = g; graded[i + 2] = b;
+    }
+
+    const out = ctx.createImageData(W, H);
+    const od = out.data;
+    const halfW = W / 2;
+    for (let y = 0; y < H; y++) {
+      const rowBase = y * W * 4;
+      for (let x = 0; x < W; x++) {
+        const i = rowBase + x * 4;
+        const edgeFrac = halfW > 0 ? Math.abs(x - halfW) / halfW : 0;
+        const off = Math.round(preset.aberrationPx * edgeFrac);
+        const ri = rowBase + Math.max(0, Math.min(W - 1, x - off)) * 4;
+        const bi = rowBase + Math.max(0, Math.min(W - 1, x + off)) * 4;
+        od[i] = sd[i] + (graded[ri] - sd[i]) * amount;
+        od[i + 1] = sd[i + 1] + (graded[i + 1] - sd[i + 1]) * amount;
+        od[i + 2] = sd[i + 2] + (graded[bi + 2] - sd[i + 2]) * amount;
+        od[i + 3] = sd[i + 3];
+      }
+    }
+    ctx.putImageData(out, 0, 0);
+  }
+
+  function applyTechOpticsBloom(W, H, preset, amount, scale) {
+    const bloom = document.createElement('canvas');
+    bloom.width = W; bloom.height = H;
+    const bctx = bloom.getContext('2d');
+    bctx.drawImage(ctx.canvas, 0, 0); // ctx.canvas, not the module-level `canvas` -- this must track whatever ctx currently points at (the offscreen hi-res canvas during export)
+    const bd = bctx.getImageData(0, 0, W, H);
+    const d = bd.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const lum = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 255;
+      const w = Math.max(0, Math.min(1, (lum - preset.bloomThreshold) / (1 - preset.bloomThreshold)));
+      d[i + 3] = d[i + 3] * w;
+    }
+    bctx.putImageData(bd, 0, 0);
+
+    ctx.save();
+    ctx.filter = `blur(${preset.bloomBlurPx * scale}px)`;
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = preset.bloomOpacity * amount;
+    ctx.drawImage(bloom, 0, 0);
+    ctx.restore();
+  }
+
+  function applyTechOpticsGrain(W, H, preset, amount, scale) {
+    const grainPx = Math.max(1, Math.round(scale));
+    ctx.save();
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.globalAlpha = preset.grainOpacity * amount;
+    ctx.drawImage(getTechOpticsNoiseLayer(W, H, grainPx), 0, 0);
+    ctx.restore();
+  }
+
+  function applyTechOpticsFlare(W, H, preset, amount, scale) {
+    const y = H * 0.22;
+    const thickness = 3 * scale;
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = preset.flareOpacity * amount;
+
+    const streak = ctx.createLinearGradient(0, y, W, y);
+    streak.addColorStop(0, 'rgba(175,216,255,0)');
+    streak.addColorStop(0.5, 'rgba(175,216,255,0.9)');
+    streak.addColorStop(1, 'rgba(175,216,255,0)');
+    ctx.fillStyle = streak;
+    ctx.fillRect(0, y - thickness / 2, W, thickness);
+
+    const hotX = W * 0.68, hotR = 40 * scale;
+    const hot = ctx.createRadialGradient(hotX, y, 0, hotX, y, hotR);
+    hot.addColorStop(0, 'rgba(210,235,255,0.9)');
+    hot.addColorStop(1, 'rgba(210,235,255,0)');
+    ctx.fillStyle = hot;
+    ctx.beginPath();
+    ctx.arc(hotX, y, hotR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function applyTechOpticsVignette(W, H, preset, amount) {
+    const cx = W / 2, cy = H / 2;
+    const outerR = Math.sqrt(cx * cx + cy * cy);
+    const grad = ctx.createRadialGradient(cx, cy, outerR * 0.5, cx, cy, outerR);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, `rgba(0,0,0,${preset.vignetteOpacity * amount})`);
+    ctx.save();
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  function applyTechOpticsHud(W, H, effects, scale) {
+    const pad = 24 * scale;
+    const bracketLen = 22 * scale;
+    const color = 'rgba(210,230,245,0.55)';
+
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(1, 1.5 * scale);
+    const corners = [
+      { x: pad, y: pad, dx: 1, dy: 1 },
+      { x: W - pad, y: pad, dx: -1, dy: 1 },
+      { x: pad, y: H - pad, dx: 1, dy: -1 },
+      { x: W - pad, y: H - pad, dx: -1, dy: -1 },
+    ];
+    ctx.beginPath();
+    for (const c of corners) {
+      ctx.moveTo(c.x + bracketLen * c.dx, c.y);
+      ctx.lineTo(c.x, c.y);
+      ctx.lineTo(c.x, c.y + bracketLen * c.dy);
+    }
+    ctx.stroke();
+
+    ctx.globalAlpha = 0.08;
+    ctx.lineWidth = Math.max(1, scale);
+    ctx.beginPath();
+    for (let i = 1; i < 4; i++) {
+      const x = (W / 4) * i;
+      ctx.moveTo(x, 0); ctx.lineTo(x, H);
+    }
+    for (let i = 1; i < 4; i++) {
+      const y = (H / 4) * i;
+      ctx.moveTo(0, y); ctx.lineTo(W, y);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    const text = (effects.techOpticsHudText || '').trim();
+    if (text) {
+      const fontPx = Math.max(9, 11 * scale);
+      ctx.font = `${fontPx}px ui-monospace, "SF Mono", "Courier New", monospace`;
+      ctx.fillStyle = 'rgba(210,230,245,0.8)';
+      ctx.textBaseline = 'bottom';
+      ctx.textAlign = 'left';
+      ctx.fillText(text.toUpperCase(), pad, H - pad - bracketLen - 6 * scale);
+    }
+    ctx.restore();
+  }
+
+  function applyTechOptics(W, H, effects) {
+    if (effects.filmStock !== 'techOptics') return;
+    const amount = (typeof effects.filmStockIntensity === 'number' ? effects.filmStockIntensity : 70) / 100;
+    if (amount <= 0) return;
+    const scale = W / 1080; // reference width, matches text-layer sizing convention
+    const preset = TECH_OPTICS_PRESET;
+
+    applyTechOpticsGradeAndAberration(W, H, preset, amount);
+    applyTechOpticsBloom(W, H, preset, amount, scale);
+    applyTechOpticsGrain(W, H, preset, amount, scale);
+    applyTechOpticsFlare(W, H, preset, amount, scale);
+    applyTechOpticsVignette(W, H, preset, amount);
+    if (effects.techOpticsHud) applyTechOpticsHud(W, H, effects, scale);
+  }
+
   // ---------- whole-composite effects (Effects tab): film stock, warmth, vignette, grain ----------
 
   function drawEffects(W, H, effects) {
     applyFilmStock(W, H, effects);
+    applyTechOptics(W, H, effects);
     if (effects.warmth > 0) {
       ctx.save();
       ctx.globalCompositeOperation = 'soft-light';
@@ -2118,6 +2362,10 @@
     filmStockIntensityRow.style.display = state.effects.filmStock === 'none' ? 'none' : 'flex';
     filmStockIntensity.value = state.effects.filmStockIntensity;
     filmStockIntensityVal.textContent = `${state.effects.filmStockIntensity}%`;
+    techOpticsHudRow.style.display = state.effects.filmStock === 'techOptics' ? 'flex' : 'none';
+    techOpticsHudTextRow.style.display = state.effects.filmStock === 'techOptics' && state.effects.techOpticsHud ? 'flex' : 'none';
+    document.getElementById('techOpticsHud').checked = state.effects.techOpticsHud;
+    techOpticsHudTextInput.value = state.effects.techOpticsHudText;
 
     logoSize.value = state.logo.sizePct;
     logoSizeVal.textContent = `${state.logo.sizePct}%`;
