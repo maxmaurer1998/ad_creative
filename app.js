@@ -1513,6 +1513,62 @@
     return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
   }
 
+  // ---------- eyedropper: sample a colour straight off the rendered canvas ----------
+
+  const eyedropperHint = document.getElementById('eyedropperHint');
+  let eyedropperInput = null;
+  let eyedropperBtn = null;
+
+  function resolveEyedropperInput(btn) {
+    const targetId = btn.dataset.colorTarget;
+    if (targetId) return document.getElementById(targetId);
+    const panel = btn.closest('.layer-panel');
+    return panel ? panel.querySelector('.layer-color') : null;
+  }
+
+  function setEyedropperActive(active) {
+    stage.classList.toggle('eyedropper-mode', active);
+    eyedropperHint.classList.toggle('hidden', !active);
+    document.querySelectorAll('.eyedropper-btn').forEach(b => b.classList.toggle('active', active && b === eyedropperBtn));
+  }
+
+  function cancelEyedropper() {
+    eyedropperInput = null;
+    eyedropperBtn = null;
+    setEyedropperActive(false);
+  }
+
+  document.querySelectorAll('.eyedropper-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (eyedropperBtn === btn) { cancelEyedropper(); return; } // clicking the same pipette again cancels
+      const input = resolveEyedropperInput(btn);
+      if (!input) return;
+      eyedropperInput = input;
+      eyedropperBtn = btn;
+      setEyedropperActive(true);
+    });
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && eyedropperInput) cancelEyedropper();
+  });
+
+  // capture phase so this runs before (and can pre-empt) the logo-drag / photo-pan
+  // pointerdown handling below -- a pick shouldn't also start dragging the logo
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!eyedropperInput) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const p = clientToCanvas(e.clientX, e.clientY);
+    const x = Math.min(canvas.width - 1, Math.max(0, Math.floor(p.x)));
+    const y = Math.min(canvas.height - 1, Math.max(0, Math.floor(p.y)));
+    const data = canvas.getContext('2d').getImageData(x, y, 1, 1).data;
+    const hex = '#' + [data[0], data[1], data[2]].map(v => v.toString(16).padStart(2, '0')).join('');
+    eyedropperInput.value = hex;
+    eyedropperInput.dispatchEvent(new Event('input', { bubbles: true }));
+    cancelEyedropper();
+  }, true);
+
   function setImageZoom(zoom) {
     if (!state.image) return;
     const clampedZoom = Math.min(4, Math.max(1, zoom));

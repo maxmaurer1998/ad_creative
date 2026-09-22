@@ -277,6 +277,54 @@ input[type="range"] {
   min-width: 100px;
 }
 
+.color-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.eyedropper-btn {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel-bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 8px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.eyedropper-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.stage.eyedropper-mode,
+.stage.eyedropper-mode #previewCanvas {
+  cursor: crosshair;
+}
+
+.eyedropper-hint {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 8px;
+  background: var(--accent-2);
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 10px;
+  border-radius: 8px;
+  text-align: center;
+  line-height: 1.35;
+  pointer-events: none;
+}
+.eyedropper-hint.hidden { display: none; }
+
 input[type="color"] {
   -webkit-appearance: none;
   appearance: none;
@@ -515,4 +563,5 @@ input[type="checkbox"] {
   .segmented button:hover:not(.active) { color: var(--text); }
   .library-row-name:hover { color: var(--accent); }
   .upload-tile:hover { border-color: var(--accent); color: var(--text); }
+  .eyedropper-btn:hover:not(.active) { border-color: var(--accent); color: var(--text); }
 }
