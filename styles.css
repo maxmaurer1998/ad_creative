@@ -31,7 +31,11 @@ html, body {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  height: 100dvh;
+  /* svh (stable viewport height) instead of dvh: dvh recalculates live as
+     Safari's toolbar animates during a scroll gesture -- including inside a
+     nested scroll box -- which was shifting this layout mid-gesture and
+     making the .panels scroll container snap back on touch release. */
+  height: 100svh;
 }
 
 .main-col {
@@ -186,7 +190,7 @@ html, body {
   flex-shrink: 0;
   background: var(--panel-bg);
   max-height: 42vh;
-  max-height: 42dvh;
+  max-height: 42svh;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
