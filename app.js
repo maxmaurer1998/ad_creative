@@ -58,11 +58,12 @@
       direction: 'bottom',
       reach: 55,
       speed: 60, // 0-100, see speedValueToPlateauK
+      intensity: 100, // 0-100, scales the max opacity the fade ever reaches
       color: '#000000',
     },
     text: {
       hAlign: 'center',
-      vAlign: 'bottom',
+      vAlign: 100, // 0=top .. 100=bottom, continuous
       layers: {
         headline:  { text: 'New Season, New Look', font: 'playfair', size: 72, color: '#ffffff' },
         subheader: { text: 'Shop the collection today', font: 'worksans', size: 36, color: '#ffffff' },
@@ -85,61 +86,87 @@
   const safeZoneRow = document.getElementById('safeZoneRow');
   const safeZoneToggle = document.getElementById('safeZoneToggle');
 
-  // ---------- session persistence (IndexedDB: settings "recipe" + the actual photo/logo images) ----------
+  // ---------- persistence (IndexedDB: session "recipe" + photo/logo blobs + a named recipe library) ----------
 
   const IDB_NAME = 'adcreative-db';
-  const IDB_STORE = 'kv';
+  const IDB_VERSION = 2;
+  const IDB_STORE_KV = 'kv';           // session state: recipe / photoBlob / logoBlob / savedLogo
+  const IDB_STORE_RECIPES = 'recipes'; // named recipe templates, keyed by name
 
   function idbOpen() {
     return new Promise((resolve, reject) => {
       if (!('indexedDB' in window)) { reject(new Error('no indexedDB')); return; }
-      const req = indexedDB.open(IDB_NAME, 1);
-      req.onupgradeneeded = () => { req.result.createObjectStore(IDB_STORE); };
+      const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(IDB_STORE_KV)) db.createObjectStore(IDB_STORE_KV);
+        if (!db.objectStoreNames.contains(IDB_STORE_RECIPES)) db.createObjectStore(IDB_STORE_RECIPES);
+      };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     });
   }
 
-  async function idbSet(key, value) {
+  async function idbSet(store, key, value) {
     try {
       const db = await idbOpen();
       await new Promise((resolve, reject) => {
-        const tx = db.transaction(IDB_STORE, 'readwrite');
-        tx.objectStore(IDB_STORE).put(value, key);
+        const tx = db.transaction(store, 'readwrite');
+        tx.objectStore(store).put(value, key);
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
       });
     } catch (e) { /* IndexedDB unavailable (private browsing, quota, etc.) - ignore */ }
   }
 
-  async function idbGet(key) {
+  async function idbGet(store, key) {
     try {
       const db = await idbOpen();
       return await new Promise((resolve, reject) => {
-        const tx = db.transaction(IDB_STORE, 'readonly');
-        const req = tx.objectStore(IDB_STORE).get(key);
+        const tx = db.transaction(store, 'readonly');
+        const req = tx.objectStore(store).get(key);
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error);
       });
     } catch (e) { return undefined; }
   }
 
-  async function idbClearAll() {
+  async function idbDelete(store, key) {
     try {
       const db = await idbOpen();
       await new Promise((resolve, reject) => {
-        const tx = db.transaction(IDB_STORE, 'readwrite');
-        tx.objectStore(IDB_STORE).clear();
+        const tx = db.transaction(store, 'readwrite');
+        tx.objectStore(store).delete(key);
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
       });
     } catch (e) { /* ignore */ }
   }
 
+  async function idbGetAllKeys(store) {
+    try {
+      const db = await idbOpen();
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(store, 'readonly');
+        const req = tx.objectStore(store).getAllKeys();
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    } catch (e) { return []; }
+  }
+
+  // maps the old 3-way top/middle/bottom toggle to the new continuous 0-100 slider
+  function legacyVAlignToNumber(val) {
+    if (val === 'top') return 0;
+    if (val === 'middle') return 50;
+    if (val === 'bottom') return 100;
+    return null;
+  }
+
   // the "recipe": every setting except the actual images, which are stored separately as blobs
   function serializeRecipe() {
     return {
-      v: 1,
+      v: 2,
       preset: state.preset,
       safeZone: state.safeZone,
       marginFrac: state.marginFrac,
@@ -168,10 +195,17 @@
     if (recipe.preset && PRESETS[recipe.preset]) state.preset = recipe.preset;
     if (typeof recipe.safeZone === 'boolean') state.safeZone = recipe.safeZone;
     if (typeof recipe.marginFrac === 'number') state.marginFrac = recipe.marginFrac;
-    if (recipe.fade) Object.assign(state.fade, recipe.fade);
+    if (recipe.fade) {
+      Object.assign(state.fade, recipe.fade);
+      if (typeof state.fade.intensity !== 'number') state.fade.intensity = 100; // pre-intensity-slider recipes
+    }
     if (recipe.text) {
       if (recipe.text.hAlign) state.text.hAlign = recipe.text.hAlign;
-      if (recipe.text.vAlign) state.text.vAlign = recipe.text.vAlign;
+      if (typeof recipe.text.vAlign === 'number') state.text.vAlign = recipe.text.vAlign;
+      else {
+        const legacy = legacyVAlignToNumber(recipe.text.vAlign);
+        if (legacy !== null) state.text.vAlign = legacy;
+      }
       if (recipe.text.layers) {
         for (const k of ['headline', 'subheader', 'other']) {
           if (recipe.text.layers[k]) Object.assign(state.text.layers[k], recipe.text.layers[k]);
@@ -191,7 +225,7 @@
   let saveRecipeTimer = null;
   function scheduleSaveRecipe() {
     clearTimeout(saveRecipeTimer);
-    saveRecipeTimer = setTimeout(() => { idbSet('recipe', serializeRecipe()); }, 400);
+    saveRecipeTimer = setTimeout(() => { idbSet(IDB_STORE_KV, 'recipe', serializeRecipe()); }, 400);
   }
 
   function loadImageFromBlob(blob) {
@@ -205,10 +239,11 @@
   }
 
   async function restoreSession() {
-    const [recipe, photoBlob, logoBlob] = await Promise.all([
-      idbGet('recipe'),
-      idbGet('photoBlob'),
-      idbGet('logoBlob'),
+    const [recipe, photoBlob, logoBlob, savedLogoBlob] = await Promise.all([
+      idbGet(IDB_STORE_KV, 'recipe'),
+      idbGet(IDB_STORE_KV, 'photoBlob'),
+      idbGet(IDB_STORE_KV, 'logoBlob'),
+      idbGet(IDB_STORE_KV, 'savedLogo'),
     ]);
 
     if (recipe) applyRecipeToState(recipe);
@@ -221,8 +256,11 @@
         exportBtn.disabled = false;
       }
     }
-    if (logoBlob) {
-      const img = await loadImageFromBlob(logoBlob);
+    // prefer this session's own logo; fall back to the persistently-saved
+    // default logo (kept even after "Clear saved session") if there is one
+    const effectiveLogoBlob = logoBlob || savedLogoBlob;
+    if (effectiveLogoBlob) {
+      const img = await loadImageFromBlob(effectiveLogoBlob);
       if (img) state.logo.img = img;
     }
 
@@ -230,14 +268,88 @@
   }
 
   async function clearSavedSession() {
-    await idbClearAll();
+    // only clear this working session -- the saved default logo and any
+    // named recipe templates are deliberate, named saves and are kept
+    await idbDelete(IDB_STORE_KV, 'recipe');
+    await idbDelete(IDB_STORE_KV, 'photoBlob');
+    await idbDelete(IDB_STORE_KV, 'logoBlob');
     try { localStorage.removeItem(LS_KEY); } catch (e) { /* ignore */ }
     location.reload();
   }
 
   document.getElementById('clearSessionBtn').addEventListener('click', () => {
-    const ok = confirm("Clear your saved photo, logo, and settings from this browser?\n\nThis can't be undone.");
+    const ok = confirm("Clear your current photo and settings from this browser?\n\nYour saved default logo and any saved recipe templates are kept. This can't be undone.");
     if (ok) clearSavedSession();
+  });
+
+  // ---------- persistent "saved logo" (kept independently of the session) ----------
+
+  function imageToPngBlob(img) {
+    return new Promise((resolve) => {
+      const off = document.createElement('canvas');
+      off.width = img.naturalWidth;
+      off.height = img.naturalHeight;
+      off.getContext('2d').drawImage(img, 0, 0);
+      off.toBlob((blob) => resolve(blob), 'image/png');
+    });
+  }
+
+  document.getElementById('saveLogoBtn').addEventListener('click', async () => {
+    if (!state.logo.img) { alert('Upload a logo first.'); return; }
+    const blob = await imageToPngBlob(state.logo.img);
+    if (blob) {
+      await idbSet(IDB_STORE_KV, 'savedLogo', blob);
+      alert('Saved. This logo will now be used by default for new sessions, even after "Clear saved session".');
+    }
+  });
+
+  document.getElementById('removeSavedLogoBtn').addEventListener('click', async () => {
+    const ok = confirm('Remove the saved default logo? (The logo on canvas right now is unaffected.)');
+    if (!ok) return;
+    await idbDelete(IDB_STORE_KV, 'savedLogo');
+  });
+
+  // ---------- named recipe library (settings-only templates, reusable across photos) ----------
+
+  const recipeSelect = document.getElementById('recipeSelect');
+
+  async function refreshRecipeList(selectName) {
+    const names = (await idbGetAllKeys(IDB_STORE_RECIPES)).sort((a, b) => a.localeCompare(b));
+    recipeSelect.innerHTML = '<option value="">— none —</option>';
+    for (const name of names) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      recipeSelect.appendChild(opt);
+    }
+    if (selectName && names.includes(selectName)) recipeSelect.value = selectName;
+  }
+
+  document.getElementById('saveRecipeBtn').addEventListener('click', async () => {
+    const name = prompt('Name this recipe (fade, text, margin, and logo size/position -- not the photo or logo image itself):');
+    if (!name || !name.trim()) return;
+    await idbSet(IDB_STORE_RECIPES, name.trim(), serializeRecipe());
+    await refreshRecipeList(name.trim());
+  });
+
+  document.getElementById('applyRecipeBtn').addEventListener('click', async () => {
+    const name = recipeSelect.value;
+    if (!name) return;
+    const recipe = await idbGet(IDB_STORE_RECIPES, name);
+    if (!recipe) return;
+    applyRecipeToState(recipe);
+    syncAllControlsFromState();
+    applyPreset(state.preset);
+    render();
+  });
+
+  document.getElementById('deleteRecipeBtn').addEventListener('click', async () => {
+    const name = recipeSelect.value;
+    if (!name) return;
+    const ok = confirm(`Delete the saved recipe "${name}"? This can't be undone.`);
+    if (!ok) return;
+    await idbDelete(IDB_STORE_RECIPES, name);
+    await refreshRecipeList();
   });
 
   // legacy fallback: versions before session-save only kept font/colour in localStorage
@@ -282,7 +394,6 @@
 
   wireSegmented('fadeDirection', (val) => { state.fade.direction = val; render(); });
   wireSegmented('textHAlign', (val) => { state.text.hAlign = val; render(); });
-  wireSegmented('textVAlign', (val) => { state.text.vAlign = val; render(); });
   wireSegmented('logoPreset', (val) => {
     applyLogoCorner(val);
     state.logo.manuallyPositioned = false;
@@ -307,6 +418,14 @@
 
   document.getElementById('fadeColor').addEventListener('input', (e) => {
     state.fade.color = e.target.value;
+    render();
+  });
+
+  const fadeIntensity = document.getElementById('fadeIntensity');
+  const fadeIntensityVal = document.getElementById('fadeIntensityVal');
+  fadeIntensity.addEventListener('input', () => {
+    state.fade.intensity = Number(fadeIntensity.value);
+    fadeIntensityVal.textContent = `${state.fade.intensity}%`;
     render();
   });
 
@@ -339,6 +458,12 @@
 
   document.getElementById('otherEnabled').addEventListener('change', (e) => {
     state.text.layers.other.enabled = e.target.checked;
+    render();
+  });
+
+  const textVPos = document.getElementById('textVPos');
+  textVPos.addEventListener('input', () => {
+    state.text.vAlign = Number(textVPos.value);
     render();
   });
 
@@ -420,7 +545,7 @@
       exportBtn.disabled = false;
       render();
     });
-    idbSet('photoBlob', file);
+    idbSet(IDB_STORE_KV, 'photoBlob', file);
   });
 
   logoInput.addEventListener('change', () => {
@@ -430,7 +555,7 @@
       state.logo.img = img;
       render();
     });
-    idbSet('logoBlob', file);
+    idbSet(IDB_STORE_KV, 'logoBlob', file);
   });
 
   // ---------- fade drawing ----------
@@ -450,6 +575,7 @@
     const scrimH = H * (fade.reach / 100);
     if (scrimH <= 0) return;
     const plateauK = speedValueToPlateauK(fade.speed);
+    const intensity = (typeof fade.intensity === 'number' ? fade.intensity : 100) / 100;
     const { r, g, b } = hexToRgb(fade.color);
 
     let yOuter, yInner; // outer = transparent edge, inner = solid edge
@@ -465,7 +591,7 @@
     const steps = 48;
     for (let s = 0; s <= steps; s++) {
       const frac = s / steps;
-      const alpha = fadeAlphaAt(frac, plateauK);
+      const alpha = fadeAlphaAt(frac, plateauK) * intensity;
       grad.addColorStop(frac, `rgba(${r},${g},${b},${alpha})`);
     }
     ctx.fillStyle = grad;
@@ -477,6 +603,7 @@
     const scrimH = H * (fade.reach / 100);
     if (scrimH <= 0) return 0;
     const plateauK = speedValueToPlateauK(fade.speed);
+    const intensity = (typeof fade.intensity === 'number' ? fade.intensity : 100) / 100;
     let zoneStart, zoneEnd; // zone in canvas y-coords, zoneStart = outer(0 alpha), zoneEnd = inner(full alpha)
     if (fade.direction === 'bottom') { zoneStart = H - scrimH; zoneEnd = H; }
     else { zoneStart = scrimH; zoneEnd = 0; }
@@ -488,10 +615,10 @@
       let alpha;
       if (fade.direction === 'bottom') {
         if (y <= zoneStart) alpha = 0;
-        else alpha = fadeAlphaAt((y - zoneStart) / scrimH, plateauK);
+        else alpha = fadeAlphaAt((y - zoneStart) / scrimH, plateauK) * intensity;
       } else {
         if (y >= zoneStart) alpha = 0;
-        else alpha = fadeAlphaAt((zoneStart - y) / scrimH, plateauK);
+        else alpha = fadeAlphaAt((zoneStart - y) / scrimH, plateauK) * intensity;
       }
       total += alpha;
     }
@@ -561,11 +688,12 @@
     const { built, totalHeight, margin } = buildTextBlock(W, H);
     if (built.length === 0) return null;
 
+    // vAlign is 0 (top) .. 100 (bottom); vPad keeps the block from ever
+    // touching the very top/bottom edge, however far it's slid
     const vPad = H * 0.06;
-    let startY;
-    if (state.text.vAlign === 'top') startY = vPad;
-    else if (state.text.vAlign === 'middle') startY = (H - totalHeight) / 2;
-    else startY = H - vPad - totalHeight;
+    const topmostY = vPad;
+    const bottommostY = H - vPad - totalHeight;
+    const startY = topmostY + (bottommostY - topmostY) * (state.text.vAlign / 100);
 
     let x;
     if (state.text.hAlign === 'left') { ctx.textAlign = 'left'; x = margin; }
@@ -601,7 +729,14 @@
     if (corner === 'top-left') { state.logo.xPct = margin + halfW; state.logo.yPct = margin + halfH; }
     else if (corner === 'top-right') { state.logo.xPct = 1 - margin - halfW; state.logo.yPct = margin + halfH; }
     else if (corner === 'bottom-left') { state.logo.xPct = margin + halfW; state.logo.yPct = 1 - margin - halfH; }
-    else { state.logo.xPct = 1 - margin - halfW; state.logo.yPct = 1 - margin - halfH; }
+    else if (corner === 'bottom-right') { state.logo.xPct = 1 - margin - halfW; state.logo.yPct = 1 - margin - halfH; }
+    else { state.logo.xPct = 0.5; state.logo.yPct = 0.5; } // 'center'
+
+    // safety net: guarantees every preset (including a logo too big for its
+    // corner) still respects the same margin the text block uses
+    const clamped = clampLogoPosition(state.logo.xPct, state.logo.yPct);
+    state.logo.xPct = clamped.xPct;
+    state.logo.yPct = clamped.yPct;
   }
 
   // clamp the logo's center x so its left/right edges never cross the same
@@ -746,9 +881,8 @@
     if (!textBounds) { legibilityBanner.classList.add('hidden'); return; }
     const avgAlpha = avgFadeAlphaOverSpan(W, H, state.fade, textBounds.top, textBounds.bottom);
     if (avgAlpha < 0.4) {
-      const suggestion = state.text.vAlign === 'bottom' && state.fade.direction !== 'bottom'
-        ? 'try switching the fade direction to Bottom, or increase fade reach'
-        : 'try Bottom alignment or increase fade reach';
+      const towardFadeEdge = state.fade.direction === 'bottom' ? 'down, toward the bottom' : 'up, toward the top';
+      const suggestion = `try sliding the text ${towardFadeEdge}, or increase the fade's reach/intensity`;
       legibilityBanner.textContent = `Text may be hard to read here — ${suggestion}.`;
       legibilityBanner.classList.remove('hidden');
     } else {
@@ -868,12 +1002,14 @@
 
     setSegmentedActive('fadeDirection', state.fade.direction);
     setSegmentedActive('textHAlign', state.text.hAlign);
-    setSegmentedActive('textVAlign', state.text.vAlign);
+    textVPos.value = state.text.vAlign;
 
     fadeReach.value = state.fade.reach;
     fadeReachVal.textContent = `${state.fade.reach}%`;
     fadeSpeed.value = state.fade.speed;
     fadeSpeedVal.textContent = speedValueToLabel(state.fade.speed);
+    fadeIntensity.value = state.fade.intensity;
+    fadeIntensityVal.textContent = `${state.fade.intensity}%`;
     document.getElementById('fadeColor').value = state.fade.color;
 
     logoSize.value = state.logo.sizePct;
@@ -894,6 +1030,7 @@
     if (!hasRecipe) loadPrefs();
 
     syncAllControlsFromState();
+    refreshRecipeList();
 
     applyPreset(state.preset);
     if (!hasRecipe) applyLogoCorner('bottom-right');

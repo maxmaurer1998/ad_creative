@@ -17,15 +17,17 @@ For the "Add to Home Screen" / installable PWA behaviour and the Web Share API "
 ## What's implemented
 
 - Upload a photo, pick a canvas preset (Feed 4:5, Feed 1:1, Story/Reels 9:16, Facebook link ad)
-- Fade overlay: direction (top/bottom), reach, speed, colour — using the smoothstep + plateau easing so the fade always blends to 0% opacity at its outer edge
-- Three independent text layers (headline, subheader, optional "other" line), each with font, size, colour; alignment (horizontal/vertical) applies to the stacked text block as a whole
+- Fade overlay: direction (top/bottom), reach, speed-to-solid, and an intensity cap (so the darkest point can be dialled down to a light tint instead of ever becoming a fully solid block), colour — using the smoothstep + plateau easing so the fade always blends to 0% opacity at its outer edge
+- Three independent text layers (headline, subheader, optional "other" line), each with font, size, colour; horizontal alignment and a continuous vertical-position slider apply to the stacked text block as a whole, always staying inside the top/bottom edge padding
 - Inline legibility warning banner when the text block sits over an insufficiently-faded area
-- Logo upload with drag-to-position on canvas (clamped to the same side margin as the text, with guide lines while dragging) and corner presets; size as % of canvas width; optional "match fade colour" tint
+- Logo upload with drag-to-position on canvas (clamped to the same side margin as the text at any size, with guide lines while dragging), corner + center position presets, and an optional "match fade colour" tint
+- A persistent "default logo" (separate from the working session) that's saved once and then loads automatically in future sessions, surviving "Clear saved session"
 - Adjustable side margin, shared by the text block width and the logo drag clamp
 - Story/Reels safe-zone overlay toggle
 - Export at full canvas resolution as PNG, via the Web Share API where supported (native "Save to Photos" sheet) with a download-link fallback
-- Installable PWA: manifest + service worker precaching the app shell and self-hosted fonts for offline use
-- Full session auto-save in IndexedDB — the uploaded photo, the logo, and every setting persist in the browser and are restored on reopen; "Clear saved session" wipes it back to a blank start
+- Installable PWA: manifest + service worker precaching the app shell and self-hosted fonts for offline use, with network-first HTML so updates show up automatically
+- Full session auto-save in IndexedDB — the uploaded photo, the logo, and every setting persist in the browser and are restored on reopen; "Clear saved session" wipes the current working state back to a blank start (saved default logo and recipe templates are kept)
+- A named recipe/template library: save the current fade/text/logo setup (not the photo) under a name, and re-apply it later to a different photo
 
 ## Fonts
 

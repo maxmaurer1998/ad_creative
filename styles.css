@@ -304,6 +304,9 @@ input[type="checkbox"] {
   flex: 1 1 45%;
   border-bottom: 1px solid var(--border);
 }
+.segmented-2x2 button:last-child:nth-child(odd) {
+  flex-basis: 100%;
+}
 
 .layer-tabs {
   display: flex;

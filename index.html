@@ -83,6 +83,17 @@
         <button id="clearSessionBtn" class="btn btn-secondary">Clear saved session</button>
       </div>
       <p class="hint-text">Your photo, logo, and every setting here are saved automatically in this browser, so reopening the app picks up right where you left off. Nothing is uploaded anywhere — use "Clear saved session" to remove it.</p>
+
+      <div class="control-row">
+        <label for="recipeSelect">Recipe templates</label>
+        <select id="recipeSelect"><option value="">— none —</option></select>
+      </div>
+      <div class="control-row">
+        <button id="applyRecipeBtn" class="btn btn-secondary">Apply</button>
+        <button id="saveRecipeBtn" class="btn btn-secondary">Save as new…</button>
+        <button id="deleteRecipeBtn" class="btn btn-secondary">Delete</button>
+      </div>
+      <p class="hint-text">Save your current fade/text/logo setup as a named template (not the photo itself), then apply it again later on a different photo.</p>
     </div>
 
     <!-- FADE PANEL -->
@@ -107,6 +118,11 @@
         <span>Fast / early solid</span>
       </div>
       <div class="control-row">
+        <label for="fadeIntensity">Intensity <span id="fadeIntensityVal">100%</span></label>
+        <input type="range" id="fadeIntensity" min="0" max="100" value="100" />
+      </div>
+      <p class="hint-text">Caps how dark the fade ever gets. Lower this to keep the photo visible through the whole fade — even at 100% reach, it will never become a fully solid block.</p>
+      <div class="control-row">
         <label for="fadeColor">Colour</label>
         <input type="color" id="fadeColor" value="#000000" />
       </div>
@@ -123,12 +139,14 @@
         </div>
       </div>
       <div class="control-row">
-        <div class="segmented" id="textVAlign">
-          <button data-val="top">Top</button>
-          <button data-val="middle">Middle</button>
-          <button data-val="bottom" class="active">Bottom</button>
-        </div>
+        <label for="textVPos">Vertical position</label>
+        <input type="range" id="textVPos" min="0" max="100" value="100" />
       </div>
+      <div class="range-scale-labels">
+        <span>Top</span>
+        <span>Bottom</span>
+      </div>
+      <p class="hint-text">Slides the whole text block up or down, without ever crossing the top/bottom edge padding. If you're on the Story/Reels preset, turn on "Show safe zone" (Canvas tab) to check the text won't sit under Instagram's own UI.</p>
 
       <div class="layer-tabs" id="layerTabs">
         <button class="layer-tab active" data-layer="headline">Headline</button>
@@ -204,6 +222,7 @@
           <button data-val="top-right">Top-right</button>
           <button data-val="bottom-left">Bottom-left</button>
           <button data-val="bottom-right" class="active">Bottom-right</button>
+          <button data-val="center">Center</button>
         </div>
       </div>
       <div class="control-row">
@@ -215,7 +234,16 @@
         <input type="checkbox" id="logoMatchFade" />
       </div>
       <p class="hint-text">Tints the logo's opaque pixels to the fade colour. Works well for a single-colour/silhouette logo; a multi-colour logo will lose its original colours when this is on.</p>
-      <p class="hint-text">Drag the logo directly on the canvas to fine-tune its position. Guide lines appear while dragging — the logo can't be dragged past them, keeping it inside the same left/right margin as the text.</p>
+      <p class="hint-text">Drag the logo directly on the canvas to fine-tune its position. Guide lines appear while dragging — the logo can't be dragged past the same left/right margin as the text, at any size.</p>
+      <div class="control-row">
+        <label>Default logo</label>
+        <button id="saveLogoBtn" class="btn btn-secondary">Save as default</button>
+      </div>
+      <div class="control-row">
+        <label></label>
+        <button id="removeSavedLogoBtn" class="btn btn-secondary">Remove default</button>
+      </div>
+      <p class="hint-text">Saving keeps this exact logo in the app permanently — new sessions load it automatically, and it survives "Clear saved session" too.</p>
     </div>
 
   </section>
