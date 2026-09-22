@@ -171,7 +171,15 @@
         <label for="fadeTextureIntensity">Grain strength <span id="fadeTextureIntensityVal">70%</span></label>
         <input type="range" id="fadeTextureIntensity" min="0" max="100" value="70" />
       </div>
-      <p class="hint-text">Adds a premium paper/leather-style grain to the fade, fading in and out exactly with the fade itself. Turn "Textured fade" on to see it, then use this slider to make it stronger or more subtle.</p>
+      <div class="control-row">
+        <label for="fadeTextureGrainSize">Grain size</label>
+        <input type="range" id="fadeTextureGrainSize" min="0" max="100" value="25" />
+      </div>
+      <div class="range-scale-labels">
+        <span>Fine</span>
+        <span>Coarse</span>
+      </div>
+      <p class="hint-text">Adds a premium paper/leather-style grain to the fade, fading in and out exactly with the fade itself. Turn "Textured fade" on to see it, then use these sliders to fine-tune it.</p>
     </div>
 
     <!-- TEXT PANEL -->
@@ -314,7 +322,15 @@
         <label for="effectGrain">Film grain <span id="effectGrainVal">0%</span></label>
         <input type="range" id="effectGrain" min="0" max="100" value="0" />
       </div>
-      <p class="hint-text">A fine grain texture over the whole ad — photo, text and logo included — for a printed/filmic finish.</p>
+      <div class="control-row">
+        <label for="effectGrainSize">Grain size</label>
+        <input type="range" id="effectGrainSize" min="0" max="100" value="25" />
+      </div>
+      <div class="range-scale-labels">
+        <span>Fine</span>
+        <span>Coarse</span>
+      </div>
+      <p class="hint-text">A grain texture over the whole ad — photo, text and logo included — for a printed/filmic finish. Turn grain up to see it, then use size to go from a fine, tight grain to big, chunky specks.</p>
       <div class="control-row">
         <label for="effectVignette">Vignette <span id="effectVignetteVal">0%</span></label>
         <input type="range" id="effectVignette" min="0" max="100" value="0" />

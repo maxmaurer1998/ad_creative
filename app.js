@@ -69,6 +69,7 @@
       color: '#000000',
       textured: false, // subtle grain/mottling, masked to the fade's own alpha
       textureIntensity: 70, // 0-100, strength of that fade-area grain
+      textureGrainSize: 25, // 0-100, particle size: 0=finest, 100=coarsest
     },
     text: {
       hAlign: 'center',
@@ -80,9 +81,10 @@
       },
     },
     effects: {
-      grain: 0,    // 0-100, film grain across the whole composite
-      vignette: 0, // 0-100, darkened edges
-      warmth: 0,   // 0-100, warm "heritage" colour-grade overlay
+      grain: 0,     // 0-100, film grain across the whole composite
+      grainSize: 25, // 0-100, particle size: 0=finest, 100=coarsest
+      vignette: 0,  // 0-100, darkened edges
+      warmth: 0,    // 0-100, warm "heritage" colour-grade overlay
     },
   };
 
@@ -749,11 +751,23 @@
     render();
   });
 
+  const fadeTextureGrainSize = document.getElementById('fadeTextureGrainSize');
+  fadeTextureGrainSize.addEventListener('input', () => {
+    state.fade.textureGrainSize = Number(fadeTextureGrainSize.value);
+    render();
+  });
+
   const effectGrain = document.getElementById('effectGrain');
   const effectGrainVal = document.getElementById('effectGrainVal');
   effectGrain.addEventListener('input', () => {
     state.effects.grain = Number(effectGrain.value);
     effectGrainVal.textContent = `${state.effects.grain}%`;
+    render();
+  });
+
+  const effectGrainSize = document.getElementById('effectGrainSize');
+  effectGrainSize.addEventListener('input', () => {
+    state.effects.grainSize = Number(effectGrainSize.value);
     render();
   });
 
@@ -977,60 +991,79 @@
     return t * t * (3 - 2 * t); // smoothstep
   }
 
-  // a tileable grain/mottling texture, generated once and reused (a
-  // CanvasPattern isn't tied to the context that created it, so this is
-  // safe to reuse on both the preview and the offscreen export contexts)
-  // builds noise at the exact target size (not a small tiled pattern) so the
-  // mottling never visibly repeats, however large the export gets. Cached by
-  // size, since the same size is drawn repeatedly during ordinary editing.
-  let cachedNoiseLayer = null; // { w, h, canvas }
-  function getNoiseLayer(w, h) {
-    if (cachedNoiseLayer && cachedNoiseLayer.w === w && cachedNoiseLayer.h === h) {
-      return cachedNoiseLayer.canvas;
-    }
-    const layer = document.createElement('canvas');
-    layer.width = w;
-    layer.height = h;
-    const nctx = layer.getContext('2d');
-
-    // coarse mottling: low-res noise upscaled with smoothing across the
-    // full target size, for soft organic blotches (like leather/paper)
-    const cellPx = 18; // approx blotch size in px, regardless of canvas size
-    const coarseW = Math.max(2, Math.round(w / cellPx));
-    const coarseH = Math.max(2, Math.round(h / cellPx));
-    const coarse = document.createElement('canvas');
-    coarse.width = coarseW;
-    coarse.height = coarseH;
-    const cctx = coarse.getContext('2d');
-    const cData = cctx.createImageData(coarseW, coarseH);
-    for (let i = 0; i < cData.data.length; i += 4) {
-      const v = Math.floor(Math.random() * 255);
-      cData.data[i] = v; cData.data[i + 1] = v; cData.data[i + 2] = v; cData.data[i + 3] = 255;
-    }
-    cctx.putImageData(cData, 0, 0);
-    nctx.imageSmoothingEnabled = true;
-    nctx.globalAlpha = 0.22;
-    nctx.drawImage(coarse, 0, 0, w, h);
-    nctx.globalAlpha = 1;
-
-    // fine grain speckle on top, drawn via a second canvas so it blends
-    // (source-over) with the mottling instead of replacing it
-    const fine = document.createElement('canvas');
-    fine.width = w;
-    fine.height = h;
-    const fctx = fine.getContext('2d');
-    const fData = fctx.createImageData(w, h);
-    for (let i = 0; i < fData.data.length; i += 4) {
-      const v = Math.random() < 0.5 ? 0 : 255;
-      fData.data[i] = v; fData.data[i + 1] = v; fData.data[i + 2] = v;
-      fData.data[i + 3] = Math.random() * 42;
-    }
-    fctx.putImageData(fData, 0, 0);
-    nctx.drawImage(fine, 0, 0);
-
-    cachedNoiseLayer = { w, h, canvas: layer };
-    return layer;
+  // maps a 0-100 "Grain size" slider to an actual particle size in px:
+  // 1px (finest -- smooth per-pixel noise) up to 8px (coarse, chunky specks)
+  function grainSizeValueToPx(value) {
+    return 1 + Math.round((value / 100) * 7);
   }
+
+  // builds noise at the exact target size (not a small tiled pattern) so the
+  // mottling never visibly repeats, however large the export gets. Each of
+  // the fade texture and the whole-image grain effect gets its own cache
+  // (via makeNoiseLayerCache below), since they're typically drawn at
+  // different sizes and grain sizes within the same render.
+  function makeNoiseLayerCache() {
+    let cached = null; // { key, canvas }
+    return function getNoiseLayer(w, h, grainPx) {
+      const key = `${w}x${h}x${grainPx}`;
+      if (cached && cached.key === key) return cached.canvas;
+
+      const layer = document.createElement('canvas');
+      layer.width = w;
+      layer.height = h;
+      const nctx = layer.getContext('2d');
+
+      // coarse mottling: low-res noise upscaled with smoothing across the
+      // full target size, for soft organic blotches (like leather/paper).
+      // Blotch size scales with grain size too -- bigger grain, bigger blotches.
+      const cellPx = 10 + grainPx * 5;
+      const coarseW = Math.max(2, Math.round(w / cellPx));
+      const coarseH = Math.max(2, Math.round(h / cellPx));
+      const coarse = document.createElement('canvas');
+      coarse.width = coarseW;
+      coarse.height = coarseH;
+      const cctx = coarse.getContext('2d');
+      const cData = cctx.createImageData(coarseW, coarseH);
+      for (let i = 0; i < cData.data.length; i += 4) {
+        const v = Math.floor(Math.random() * 255);
+        cData.data[i] = v; cData.data[i + 1] = v; cData.data[i + 2] = v; cData.data[i + 3] = 255;
+      }
+      cctx.putImageData(cData, 0, 0);
+      nctx.imageSmoothingEnabled = true;
+      nctx.globalAlpha = 0.22;
+      nctx.drawImage(coarse, 0, 0, w, h);
+      nctx.globalAlpha = 1;
+
+      // fine grain speckle: generated at a reduced resolution (one noise
+      // pixel per grainPx-sized block) and scaled up WITHOUT smoothing, so
+      // each speck stays a crisp, chunky block at larger grain sizes instead
+      // of blurring into the mottling -- that's what makes grain size read
+      // as "coarse" rather than just "stronger". At grainPx=1 this is
+      // ordinary smooth per-pixel noise.
+      const speckleW = Math.max(1, Math.round(w / grainPx));
+      const speckleH = Math.max(1, Math.round(h / grainPx));
+      const fineSmall = document.createElement('canvas');
+      fineSmall.width = speckleW;
+      fineSmall.height = speckleH;
+      const fsctx = fineSmall.getContext('2d');
+      const fData = fsctx.createImageData(speckleW, speckleH);
+      for (let i = 0; i < fData.data.length; i += 4) {
+        const v = Math.random() < 0.5 ? 0 : 255;
+        fData.data[i] = v; fData.data[i + 1] = v; fData.data[i + 2] = v;
+        fData.data[i + 3] = Math.random() * 42;
+      }
+      fsctx.putImageData(fData, 0, 0);
+      nctx.imageSmoothingEnabled = false;
+      nctx.drawImage(fineSmall, 0, 0, w, h);
+      nctx.imageSmoothingEnabled = true;
+
+      cached = { key, canvas: layer };
+      return layer;
+    };
+  }
+
+  const getFadeNoiseLayer = makeNoiseLayerCache();
+  const getEffectsNoiseLayer = makeNoiseLayerCache();
 
   function drawFade(W, H, fade) {
     const scrimH = H * (fade.reach / 100);
@@ -1070,9 +1103,10 @@
     lctx.fillRect(0, 0, W, scrimH);
 
     if (fade.textured) {
+      const grainPx = grainSizeValueToPx(typeof fade.textureGrainSize === 'number' ? fade.textureGrainSize : 25);
       lctx.globalCompositeOperation = 'source-atop';
       lctx.globalAlpha = (typeof fade.textureIntensity === 'number' ? fade.textureIntensity : 100) / 100;
-      lctx.drawImage(getNoiseLayer(W, scrimH), 0, 0);
+      lctx.drawImage(getFadeNoiseLayer(W, scrimH, grainPx), 0, 0);
       lctx.globalAlpha = 1;
     }
 
@@ -1102,9 +1136,10 @@
       ctx.restore();
     }
     if (effects.grain > 0) {
+      const grainPx = grainSizeValueToPx(typeof effects.grainSize === 'number' ? effects.grainSize : 25);
       ctx.save();
       ctx.globalAlpha = (effects.grain / 100) * 0.9;
-      ctx.drawImage(getNoiseLayer(W, H), 0, 0);
+      ctx.drawImage(getEffectsNoiseLayer(W, H, grainPx), 0, 0);
       ctx.restore();
     }
   }
@@ -1871,9 +1906,11 @@
     document.getElementById('fadeTextured').checked = state.fade.textured;
     fadeTextureIntensity.value = state.fade.textureIntensity;
     fadeTextureIntensityVal.textContent = `${state.fade.textureIntensity}%`;
+    fadeTextureGrainSize.value = state.fade.textureGrainSize;
 
     effectGrain.value = state.effects.grain;
     effectGrainVal.textContent = `${state.effects.grain}%`;
+    effectGrainSize.value = state.effects.grainSize;
     effectVignette.value = state.effects.vignette;
     effectVignetteVal.textContent = `${state.effects.vignette}%`;
     effectWarmth.value = state.effects.warmth;
