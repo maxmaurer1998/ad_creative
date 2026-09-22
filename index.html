@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<title>Ad Creative</title>
+<meta name="description" content="Build product ad creative on your phone — fade, headline, logo, export." />
+<meta name="theme-color" content="#0f0f12" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<link rel="icon" href="icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Ad Creative" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="fonts/fonts.css" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<div id="app">
+ <div class="main-col">
+  <header class="topbar">
+    <h1>Ad Creative</h1>
+    <button id="exportBtn" class="btn btn-primary" disabled>Export</button>
+  </header>
+
+  <main class="stage-wrap">
+    <div id="stage" class="stage">
+      <canvas id="previewCanvas"></canvas>
+      <div id="dropHint" class="drop-hint">
+        <label for="imageInput" class="upload-tile">
+          <span class="upload-icon">＋</span>
+          <span>Upload Image</span>
+        </label>
+      </div>
+      <div id="legibilityBanner" class="legibility-banner hidden"></div>
+    </div>
+    <input type="file" id="imageInput" accept="image/*" hidden />
+  </main>
+
+  <nav class="tabbar" id="tabbar">
+    <button class="tab-btn active" data-panel="panel-canvas">Canvas</button>
+    <button class="tab-btn" data-panel="panel-fade">Fade</button>
+    <button class="tab-btn" data-panel="panel-text">Text</button>
+    <button class="tab-btn" data-panel="panel-logo">Logo</button>
+  </nav>
+ </div>
+
+  <section class="panels" id="panels">
+
+    <!-- CANVAS / PRESET PANEL -->
+    <div class="panel active" id="panel-canvas">
+      <div class="control-row">
+        <label>Canvas preset</label>
+        <select id="presetSelect">
+          <option value="1080x1350">Feed (portrait) 4:5</option>
+          <option value="1080x1080">Feed (square) 1:1</option>
+          <option value="1080x1920">Story / Reels 9:16</option>
+          <option value="1200x628">Facebook link ad</option>
+        </select>
+      </div>
+      <div class="control-row" id="safeZoneRow" style="display:none;">
+        <label for="safeZoneToggle">Show safe zone</label>
+        <input type="checkbox" id="safeZoneToggle" />
+      </div>
+      <div class="control-row">
+        <label for="imageInput2">Photo</label>
+        <label for="imageInput" class="btn btn-secondary">Choose photo…</label>
+      </div>
+      <div class="control-row">
+        <label for="logoInput">Logo</label>
+        <label for="logoInput" class="btn btn-secondary">Choose logo…</label>
+        <input type="file" id="logoInput" accept="image/*" hidden />
+      </div>
+    </div>
+
+    <!-- FADE PANEL -->
+    <div class="panel" id="panel-fade">
+      <div class="control-row">
+        <label>Direction</label>
+        <div class="segmented" id="fadeDirection">
+          <button data-val="bottom" class="active">Bottom</button>
+          <button data-val="top">Top</button>
+        </div>
+      </div>
+      <div class="control-row">
+        <label for="fadeReach">Reach <span id="fadeReachVal">55%</span></label>
+        <input type="range" id="fadeReach" min="0" max="100" value="55" />
+      </div>
+      <div class="control-row">
+        <label>Speed</label>
+        <div class="segmented" id="fadeSpeed">
+          <button data-val="slow">Slow</button>
+          <button data-val="medium" class="active">Medium</button>
+          <button data-val="fast">Fast</button>
+        </div>
+      </div>
+      <div class="control-row">
+        <label for="fadeColor">Colour</label>
+        <input type="color" id="fadeColor" value="#000000" />
+      </div>
+    </div>
+
+    <!-- TEXT PANEL -->
+    <div class="panel" id="panel-text">
+      <div class="control-row">
+        <label>Text block alignment</label>
+        <div class="segmented" id="textHAlign">
+          <button data-val="left">Left</button>
+          <button data-val="center" class="active">Center</button>
+          <button data-val="right">Right</button>
+        </div>
+      </div>
+      <div class="control-row">
+        <div class="segmented" id="textVAlign">
+          <button data-val="top">Top</button>
+          <button data-val="middle">Middle</button>
+          <button data-val="bottom" class="active">Bottom</button>
+        </div>
+      </div>
+
+      <div class="layer-tabs" id="layerTabs">
+        <button class="layer-tab active" data-layer="headline">Headline</button>
+        <button class="layer-tab" data-layer="subheader">Subheader</button>
+        <button class="layer-tab" data-layer="other">Other</button>
+      </div>
+
+      <div class="layer-panel" id="layer-headline" data-layer="headline">
+        <div class="control-row">
+          <textarea class="layer-text" rows="2" placeholder="Headline text">New Season, New Look</textarea>
+        </div>
+        <div class="control-row">
+          <label>Font</label>
+          <select class="layer-font"></select>
+        </div>
+        <div class="control-row">
+          <label>Size <span class="layer-size-val">72px</span></label>
+          <input type="range" class="layer-size" min="16" max="160" value="72" />
+        </div>
+        <div class="control-row">
+          <label>Colour</label>
+          <input type="color" class="layer-color" value="#ffffff" />
+        </div>
+      </div>
+
+      <div class="layer-panel hidden" id="layer-subheader" data-layer="subheader">
+        <div class="control-row">
+          <textarea class="layer-text" rows="2" placeholder="Subheader text">Shop the collection today</textarea>
+        </div>
+        <div class="control-row">
+          <label>Font</label>
+          <select class="layer-font"></select>
+        </div>
+        <div class="control-row">
+          <label>Size <span class="layer-size-val">36px</span></label>
+          <input type="range" class="layer-size" min="12" max="120" value="36" />
+        </div>
+        <div class="control-row">
+          <label>Colour</label>
+          <input type="color" class="layer-color" value="#ffffff" />
+        </div>
+      </div>
+
+      <div class="layer-panel hidden" id="layer-other" data-layer="other">
+        <div class="control-row">
+          <label for="otherEnabled">Enabled</label>
+          <input type="checkbox" id="otherEnabled" />
+        </div>
+        <div class="control-row">
+          <textarea class="layer-text" rows="1" placeholder="Extra line, e.g. price / detail">Limited time only</textarea>
+        </div>
+        <div class="control-row">
+          <label>Font</label>
+          <select class="layer-font"></select>
+        </div>
+        <div class="control-row">
+          <label>Size <span class="layer-size-val">24px</span></label>
+          <input type="range" class="layer-size" min="10" max="100" value="24" />
+        </div>
+        <div class="control-row">
+          <label>Colour</label>
+          <input type="color" class="layer-color" value="#ffffff" />
+        </div>
+      </div>
+    </div>
+
+    <!-- LOGO PANEL -->
+    <div class="panel" id="panel-logo">
+      <div class="control-row">
+        <label>Position preset</label>
+        <div class="segmented segmented-2x2" id="logoPreset">
+          <button data-val="top-left">Top-left</button>
+          <button data-val="top-right">Top-right</button>
+          <button data-val="bottom-left">Bottom-left</button>
+          <button data-val="bottom-right" class="active">Bottom-right</button>
+        </div>
+      </div>
+      <div class="control-row">
+        <label for="logoSize">Size <span id="logoSizeVal">18%</span></label>
+        <input type="range" id="logoSize" min="5" max="50" value="18" />
+      </div>
+      <p class="hint-text">Drag the logo directly on the canvas to fine-tune its position.</p>
+    </div>
+
+  </section>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

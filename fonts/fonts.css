@@ -1,0 +1,95 @@
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('inter-400.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('inter-600.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('inter-700.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Work Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('worksans-400.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Work Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('worksans-600.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Work Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('worksans-700.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('archivo-400.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('archivo-600.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('archivo-700.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Playfair Display';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('playfair-600.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Playfair Display';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('playfair-700.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('fraunces-600.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('fraunces-700.ttf') format('truetype');
+}
