@@ -68,6 +68,7 @@
       intensity: 100, // 0-100, scales the max opacity the fade ever reaches
       color: '#000000',
       textured: false, // subtle grain/mottling, masked to the fade's own alpha
+      textureIntensity: 70, // 0-100, strength of that fade-area grain
     },
     text: {
       hAlign: 'center',
@@ -77,6 +78,11 @@
         subheader: { text: 'Shop the collection today', font: 'worksans', size: 36, color: '#ffffff' },
         other:     { text: 'Limited time only', font: 'worksans', size: 24, color: '#ffffff', enabled: false },
       },
+    },
+    effects: {
+      grain: 0,    // 0-100, film grain across the whole composite
+      vignette: 0, // 0-100, darkened edges
+      warmth: 0,   // 0-100, warm "heritage" colour-grade overlay
     },
   };
 
@@ -240,6 +246,7 @@
         colorMode: state.logo.colorMode,
         customColor: state.logo.customColor,
       },
+      effects: { ...state.effects },
     };
   }
 
@@ -252,7 +259,9 @@
     if (recipe.fade) {
       Object.assign(state.fade, recipe.fade);
       if (typeof state.fade.intensity !== 'number') state.fade.intensity = 100; // pre-intensity-slider recipes
+      if (typeof state.fade.textureIntensity !== 'number') state.fade.textureIntensity = 70; // pre-textureIntensity recipes
     }
+    if (recipe.effects) Object.assign(state.effects, recipe.effects);
     if (recipe.text) {
       if (recipe.text.hAlign) state.text.hAlign = recipe.text.hAlign;
       if (typeof recipe.text.vAlign === 'number') state.text.vAlign = recipe.text.vAlign;
@@ -732,6 +741,38 @@
     render();
   });
 
+  const fadeTextureIntensity = document.getElementById('fadeTextureIntensity');
+  const fadeTextureIntensityVal = document.getElementById('fadeTextureIntensityVal');
+  fadeTextureIntensity.addEventListener('input', () => {
+    state.fade.textureIntensity = Number(fadeTextureIntensity.value);
+    fadeTextureIntensityVal.textContent = `${state.fade.textureIntensity}%`;
+    render();
+  });
+
+  const effectGrain = document.getElementById('effectGrain');
+  const effectGrainVal = document.getElementById('effectGrainVal');
+  effectGrain.addEventListener('input', () => {
+    state.effects.grain = Number(effectGrain.value);
+    effectGrainVal.textContent = `${state.effects.grain}%`;
+    render();
+  });
+
+  const effectVignette = document.getElementById('effectVignette');
+  const effectVignetteVal = document.getElementById('effectVignetteVal');
+  effectVignette.addEventListener('input', () => {
+    state.effects.vignette = Number(effectVignette.value);
+    effectVignetteVal.textContent = `${state.effects.vignette}%`;
+    render();
+  });
+
+  const effectWarmth = document.getElementById('effectWarmth');
+  const effectWarmthVal = document.getElementById('effectWarmthVal');
+  effectWarmth.addEventListener('input', () => {
+    state.effects.warmth = Number(effectWarmth.value);
+    effectWarmthVal.textContent = `${state.effects.warmth}%`;
+    render();
+  });
+
   const logoSize = document.getElementById('logoSize');
   const logoSizeVal = document.getElementById('logoSizeVal');
   logoSize.addEventListener('input', () => {
@@ -968,7 +1009,7 @@
     }
     cctx.putImageData(cData, 0, 0);
     nctx.imageSmoothingEnabled = true;
-    nctx.globalAlpha = 0.1;
+    nctx.globalAlpha = 0.22;
     nctx.drawImage(coarse, 0, 0, w, h);
     nctx.globalAlpha = 1;
 
@@ -982,7 +1023,7 @@
     for (let i = 0; i < fData.data.length; i += 4) {
       const v = Math.random() < 0.5 ? 0 : 255;
       fData.data[i] = v; fData.data[i + 1] = v; fData.data[i + 2] = v;
-      fData.data[i + 3] = Math.random() * 22;
+      fData.data[i + 3] = Math.random() * 42;
     }
     fctx.putImageData(fData, 0, 0);
     nctx.drawImage(fine, 0, 0);
@@ -1030,10 +1071,42 @@
 
     if (fade.textured) {
       lctx.globalCompositeOperation = 'source-atop';
+      lctx.globalAlpha = (typeof fade.textureIntensity === 'number' ? fade.textureIntensity : 100) / 100;
       lctx.drawImage(getNoiseLayer(W, scrimH), 0, 0);
+      lctx.globalAlpha = 1;
     }
 
     ctx.drawImage(layer, 0, rectY);
+  }
+
+  // ---------- whole-composite effects (Effects tab): warmth, vignette, grain ----------
+
+  function drawEffects(W, H, effects) {
+    if (effects.warmth > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'soft-light';
+      ctx.globalAlpha = effects.warmth / 100;
+      ctx.fillStyle = 'rgb(255,175,90)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
+    if (effects.vignette > 0) {
+      const cx = W / 2, cy = H / 2;
+      const outerR = Math.sqrt(cx * cx + cy * cy);
+      const grad = ctx.createRadialGradient(cx, cy, outerR * 0.5, cx, cy, outerR);
+      grad.addColorStop(0, 'rgba(0,0,0,0)');
+      grad.addColorStop(1, `rgba(0,0,0,${(effects.vignette / 100) * 0.7})`);
+      ctx.save();
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
+    if (effects.grain > 0) {
+      ctx.save();
+      ctx.globalAlpha = (effects.grain / 100) * 0.9;
+      ctx.drawImage(getNoiseLayer(W, H), 0, 0);
+      ctx.restore();
+    }
   }
 
   // average fade alpha across a vertical span [y0,y1] (for legibility check)
@@ -1304,6 +1377,7 @@
     drawFade(W, H, state.fade);
     const textBounds = drawTextBlock(W, H);
     drawLogo(W, H);
+    drawEffects(W, H, state.effects);
     if (includeEditingAids) {
       drawLogoGuides(W, H);
       drawSafeZone(W, H);
@@ -1795,6 +1869,15 @@
     fadeIntensityVal.textContent = `${state.fade.intensity}%`;
     document.getElementById('fadeColor').value = state.fade.color;
     document.getElementById('fadeTextured').checked = state.fade.textured;
+    fadeTextureIntensity.value = state.fade.textureIntensity;
+    fadeTextureIntensityVal.textContent = `${state.fade.textureIntensity}%`;
+
+    effectGrain.value = state.effects.grain;
+    effectGrainVal.textContent = `${state.effects.grain}%`;
+    effectVignette.value = state.effects.vignette;
+    effectVignetteVal.textContent = `${state.effects.vignette}%`;
+    effectWarmth.value = state.effects.warmth;
+    effectWarmthVal.textContent = `${state.effects.warmth}%`;
 
     logoSize.value = state.logo.sizePct;
     logoSizeVal.textContent = `${state.logo.sizePct}%`;

@@ -48,6 +48,7 @@
     <button class="tab-btn" data-panel="panel-fade">Fade</button>
     <button class="tab-btn" data-panel="panel-text">Text</button>
     <button class="tab-btn" data-panel="panel-logo">Logo</button>
+    <button class="tab-btn" data-panel="panel-effects">Effects</button>
   </nav>
  </div>
 
@@ -166,7 +167,11 @@
         <label for="fadeTextured">Textured fade</label>
         <input type="checkbox" id="fadeTextured" />
       </div>
-      <p class="hint-text">Adds a subtle premium-paper/leather grain to the fade, fading in and out exactly with the fade itself.</p>
+      <div class="control-row">
+        <label for="fadeTextureIntensity">Grain strength <span id="fadeTextureIntensityVal">70%</span></label>
+        <input type="range" id="fadeTextureIntensity" min="0" max="100" value="70" />
+      </div>
+      <p class="hint-text">Adds a premium paper/leather-style grain to the fade, fading in and out exactly with the fade itself. Turn "Textured fade" on to see it, then use this slider to make it stronger or more subtle.</p>
     </div>
 
     <!-- TEXT PANEL -->
@@ -301,6 +306,25 @@
         <button id="removeSavedLogoBtn" class="btn btn-secondary">Remove default</button>
       </div>
       <p class="hint-text">Saving keeps this exact logo in the app permanently — new sessions load it automatically, and it survives "Clear saved session" too.</p>
+    </div>
+
+    <!-- EFFECTS PANEL -->
+    <div class="panel" id="panel-effects">
+      <div class="control-row">
+        <label for="effectGrain">Film grain <span id="effectGrainVal">0%</span></label>
+        <input type="range" id="effectGrain" min="0" max="100" value="0" />
+      </div>
+      <p class="hint-text">A fine grain texture over the whole ad — photo, text and logo included — for a printed/filmic finish.</p>
+      <div class="control-row">
+        <label for="effectVignette">Vignette <span id="effectVignetteVal">0%</span></label>
+        <input type="range" id="effectVignette" min="0" max="100" value="0" />
+      </div>
+      <p class="hint-text">Softly darkens the corners and edges, drawing the eye toward the centre — a classic premium-photography look.</p>
+      <div class="control-row">
+        <label for="effectWarmth">Warm tone <span id="effectWarmthVal">0%</span></label>
+        <input type="range" id="effectWarmth" min="0" max="100" value="0" />
+      </div>
+      <p class="hint-text">A subtle warm, amber colour grade for a heritage/vintage feel. Works well layered with grain and a light vignette.</p>
     </div>
 
   </section>
