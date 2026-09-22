@@ -903,6 +903,9 @@
       state.imageTransform = { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5 }; // reset crop for the new photo
       imageZoom.value = 100;
       imageZoomVal.textContent = '100%';
+      videoKeyframeA = null; // old points don't apply to a new photo's content
+      videoKeyframeB = null;
+      updateVideoKeyframeUI();
       dropHint.classList.add('hidden');
       exportBtn.disabled = false;
       render();
@@ -1595,6 +1598,181 @@
 
   exportBtn.addEventListener('click', exportImage);
 
+  // ---------- Ken Burns video export (Position tab: pan/zoom between two keyframes) ----------
+
+  let videoKeyframeA = null; // { zoom, offsetXPct, offsetYPct } snapshots of imageTransform
+  let videoKeyframeB = null;
+  let videoDurationSec = 4;
+
+  function snapshotImageTransform() {
+    return { zoom: state.imageTransform.zoom, offsetXPct: state.imageTransform.offsetXPct, offsetYPct: state.imageTransform.offsetYPct };
+  }
+
+  function lerpTransform(a, b, t) {
+    return {
+      zoom: a.zoom + (b.zoom - a.zoom) * t,
+      offsetXPct: a.offsetXPct + (b.offsetXPct - a.offsetXPct) * t,
+      offsetYPct: a.offsetYPct + (b.offsetYPct - a.offsetYPct) * t,
+    };
+  }
+
+  function easeInOutT(t) { return t * t * (3 - 2 * t); } // smoothstep
+
+  function pickVideoMimeType() {
+    if (!window.MediaRecorder) return '';
+    const candidates = [
+      'video/mp4;codecs=avc1', 'video/mp4',                                   // Safari
+      'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm',         // Chrome/Firefox/Android
+    ];
+    for (const c of candidates) {
+      if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(c)) return c;
+    }
+    return '';
+  }
+
+  // video gets its own (lower) resolution cap than image export -- rendering
+  // a full composite 30x/sec for several seconds needs to stay smooth on a
+  // phone, so this favours frame-rate over the max sharpness a still export
+  // would use.
+  const MAX_VIDEO_DIMENSION = 1920;
+  function computeScaleForTransform(transform, maxDimension) {
+    if (!state.image) return 1;
+    const original = state.imageTransform;
+    state.imageTransform = transform;
+    const { sw, sh } = getImageCropRect(state.image, state.canvasW, state.canvasH);
+    state.imageTransform = original;
+    const neededScale = Math.max(sw / state.canvasW, sh / state.canvasH, 1);
+    const maxAllowedScale = maxDimension / Math.max(state.canvasW, state.canvasH);
+    return Math.min(neededScale, maxAllowedScale);
+  }
+  function computeExportScaleForVideo() {
+    return Math.max(
+      computeScaleForTransform(videoKeyframeA, MAX_VIDEO_DIMENSION),
+      computeScaleForTransform(videoKeyframeB, MAX_VIDEO_DIMENSION)
+    );
+  }
+
+  const exportVideoBtn = document.getElementById('exportVideoBtn');
+
+  function updateVideoKeyframeUI() {
+    document.getElementById('setPointABtn').textContent = videoKeyframeA ? 'Point A ✓ (tap to update)' : 'Set Point A';
+    document.getElementById('setPointBBtn').textContent = videoKeyframeB ? 'Point B ✓ (tap to update)' : 'Set Point B';
+    exportVideoBtn.disabled = !(videoKeyframeA && videoKeyframeB && state.image);
+  }
+
+  document.getElementById('setPointABtn').addEventListener('click', () => {
+    if (!state.image) { alert('Upload a photo first.'); return; }
+    videoKeyframeA = snapshotImageTransform();
+    updateVideoKeyframeUI();
+  });
+  document.getElementById('setPointBBtn').addEventListener('click', () => {
+    if (!state.image) { alert('Upload a photo first.'); return; }
+    videoKeyframeB = snapshotImageTransform();
+    updateVideoKeyframeUI();
+  });
+
+  const videoDuration = document.getElementById('videoDuration');
+  const videoDurationVal = document.getElementById('videoDurationVal');
+  videoDuration.addEventListener('input', () => {
+    videoDurationSec = Number(videoDuration.value);
+    videoDurationVal.textContent = `${videoDurationSec}s`;
+  });
+
+  async function recordKenBurnsVideo() {
+    if (!state.image) { alert('Upload a photo first.'); return; }
+    if (!videoKeyframeA || !videoKeyframeB) { alert('Set both Point A and Point B first.'); return; }
+    const mimeType = pickVideoMimeType();
+    if (!mimeType) { alert("This browser doesn't support recording video. Try a recent Chrome or Safari."); return; }
+
+    exportVideoBtn.disabled = true;
+    exportVideoBtn.textContent = 'Recording…';
+    const previewCtx = ctx;
+    const originalTransform = state.imageTransform;
+    let offscreenEl = null;
+
+    try {
+      const scale = computeExportScaleForVideo();
+      const exportW = Math.round(state.canvasW * scale);
+      const exportH = Math.round(state.canvasH * scale);
+
+      const offscreen = document.createElement('canvas');
+      offscreen.width = exportW;
+      offscreen.height = exportH;
+      // captureStream() needs the canvas actually in the rendered document
+      // to produce real frames in some browsers -- kept off-screen and
+      // invisible, but present in the DOM for the duration of the recording
+      offscreen.style.cssText = 'position:fixed; left:-99999px; top:0; width:1px; height:1px;';
+      document.body.appendChild(offscreen);
+      offscreenEl = offscreen;
+      const offCtx = offscreen.getContext('2d');
+      offCtx.imageSmoothingEnabled = true;
+      offCtx.imageSmoothingQuality = 'high';
+
+      const stream = offscreen.captureStream(30);
+      // no explicit videoBitsPerSecond: some browsers silently produce a
+      // zero-byte recording at this resolution when one is specified --
+      // letting the browser pick its own default bitrate is reliable
+      const recorder = new MediaRecorder(stream, { mimeType });
+      const chunks = [];
+      recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      const stopped = new Promise((resolve) => { recorder.onstop = resolve; });
+      recorder.start();
+
+      ctx = offCtx;
+      const durationMs = videoDurationSec * 1000;
+      const startTime = performance.now();
+      await new Promise((resolve) => {
+        function frame(now) {
+          const rawT = Math.min((now - startTime) / durationMs, 1);
+          state.imageTransform = lerpTransform(videoKeyframeA, videoKeyframeB, easeInOutT(rawT));
+          paintComposite(exportW, exportH, false);
+          if (rawT < 1) requestAnimationFrame(frame);
+          else resolve();
+        }
+        requestAnimationFrame(frame);
+      });
+
+      recorder.stop();
+      await stopped;
+      ctx = previewCtx;
+      state.imageTransform = originalTransform;
+      render();
+      offscreenEl.remove();
+      offscreenEl = null;
+
+      const blob = new Blob(chunks, { type: mimeType.split(';')[0] });
+      const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+      const file = new File([blob], `ad-creative-${Date.now()}.${ext}`, { type: blob.type });
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Ad Creative video' });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = file.name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+      }
+    } catch (err) {
+      ctx = previewCtx;
+      state.imageTransform = originalTransform;
+      render();
+      if (err && err.name !== 'AbortError') {
+        console.error(err);
+        alert('Video export failed. Please try again.');
+      }
+    } finally {
+      if (offscreenEl) offscreenEl.remove();
+      updateVideoKeyframeUI();
+      exportVideoBtn.textContent = 'Export video';
+    }
+  }
+
+  exportVideoBtn.addEventListener('click', recordKenBurnsVideo);
+
   // ---------- init ----------
 
   function setSegmentedActive(containerId, val) {
@@ -1645,6 +1823,7 @@
 
     syncAllControlsFromState();
     refreshRecipeList();
+    updateVideoKeyframeUI();
 
     applyPreset(state.preset);
     if (!hasRecipe) applyLogoCorner('bottom-right');

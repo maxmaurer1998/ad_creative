@@ -114,6 +114,22 @@
         <button id="resetImagePositionBtn" class="btn btn-secondary">Reset position</button>
       </div>
       <p class="hint-text">While this tab is open, drag directly on the photo to reposition it, and pinch (or use the Zoom slider) to zoom in. The photo locks in place again as soon as you switch to another tab.</p>
+
+      <div class="control-row">
+        <label>Video (Ken Burns)</label>
+      </div>
+      <div class="control-row">
+        <button id="setPointABtn" class="btn btn-secondary">Set Point A</button>
+        <button id="setPointBBtn" class="btn btn-secondary">Set Point B</button>
+      </div>
+      <div class="control-row">
+        <label for="videoDuration">Duration <span id="videoDurationVal">4s</span></label>
+        <input type="range" id="videoDuration" min="2" max="10" value="4" />
+      </div>
+      <div class="control-row">
+        <button id="exportVideoBtn" class="btn btn-primary" disabled>Export video</button>
+      </div>
+      <p class="hint-text">Pan/zoom the photo to a starting view and tap "Set Point A", then to an ending view and tap "Set Point B". Export smoothly animates between them over the chosen duration — text and logo stay fixed on top. Video format depends on your browser (MP4 on Safari, WebM elsewhere).</p>
     </div>
 
     <!-- FADE PANEL -->
