@@ -89,12 +89,12 @@
         <input type="range" id="fadeReach" min="0" max="100" value="55" />
       </div>
       <div class="control-row">
-        <label>Speed</label>
-        <div class="segmented" id="fadeSpeed">
-          <button data-val="slow">Slow</button>
-          <button data-val="medium" class="active">Medium</button>
-          <button data-val="fast">Fast</button>
-        </div>
+        <label for="fadeSpeed">Speed to solid <span id="fadeSpeedVal">Medium</span></label>
+        <input type="range" id="fadeSpeed" min="0" max="100" value="60" />
+      </div>
+      <div class="range-scale-labels">
+        <span>Slow / gradual</span>
+        <span>Fast / early solid</span>
       </div>
       <div class="control-row">
         <label for="fadeColor">Colour</label>
@@ -200,7 +200,7 @@
         <label for="logoSize">Size <span id="logoSizeVal">18%</span></label>
         <input type="range" id="logoSize" min="5" max="50" value="18" />
       </div>
-      <p class="hint-text">Drag the logo directly on the canvas to fine-tune its position.</p>
+      <p class="hint-text">Drag the logo directly on the canvas to fine-tune its position. Guide lines appear while dragging — the logo can't be dragged past them, keeping it inside the same left/right margin as the text.</p>
     </div>
 
   </section>

@@ -20,7 +20,21 @@
     { id: 'system', label: 'System', css: "system-ui, -apple-system, sans-serif", weight: 700 },
   ];
 
-  const SPEED_PLATEAU = { slow: 0.6, medium: 0.35, fast: 0.18 };
+  // continuous fade-speed slider (0=slow/gradual, 100=fast/early-solid), mapped
+  // linearly across the plateau_k range from the spec (slow=0.6 ... fast=0.18)
+  const PLATEAU_SLOW = 0.6;
+  const PLATEAU_FAST = 0.18;
+  function speedValueToPlateauK(value) {
+    return PLATEAU_SLOW + (PLATEAU_FAST - PLATEAU_SLOW) * (value / 100);
+  }
+  function speedValueToLabel(value) {
+    if (value < 34) return 'Slow';
+    if (value < 67) return 'Medium';
+    return 'Fast';
+  }
+
+  // logo horizontal drag is clamped to the same margin used by the text block
+  const TEXT_MARGIN_FRAC = 0.08;
 
   const LS_KEY = 'adcreative.prefs.v1';
 
@@ -42,7 +56,7 @@
     fade: {
       direction: 'bottom',
       reach: 55,
-      speed: 'medium',
+      speed: 60, // 0-100, see speedValueToPlateauK
       color: '#000000',
     },
     text: {
@@ -125,7 +139,6 @@
   }
 
   wireSegmented('fadeDirection', (val) => { state.fade.direction = val; render(); });
-  wireSegmented('fadeSpeed', (val) => { state.fade.speed = val; render(); });
   wireSegmented('textHAlign', (val) => { state.text.hAlign = val; render(); });
   wireSegmented('textVAlign', (val) => { state.text.vAlign = val; render(); });
   wireSegmented('logoPreset', (val) => {
@@ -142,6 +155,14 @@
     render();
   });
 
+  const fadeSpeed = document.getElementById('fadeSpeed');
+  const fadeSpeedVal = document.getElementById('fadeSpeedVal');
+  fadeSpeed.addEventListener('input', () => {
+    state.fade.speed = Number(fadeSpeed.value);
+    fadeSpeedVal.textContent = speedValueToLabel(state.fade.speed);
+    render();
+  });
+
   document.getElementById('fadeColor').addEventListener('input', (e) => {
     state.fade.color = e.target.value;
     render();
@@ -153,6 +174,9 @@
   logoSize.addEventListener('input', () => {
     state.logo.sizePct = Number(logoSize.value);
     logoSizeVal.textContent = `${state.logo.sizePct}%`;
+    const clamped = clampLogoPosition(state.logo.xPct, state.logo.yPct);
+    state.logo.xPct = clamped.xPct;
+    state.logo.yPct = clamped.yPct;
     render();
   });
 
@@ -262,7 +286,7 @@
   function drawFade(W, H, fade) {
     const scrimH = H * (fade.reach / 100);
     if (scrimH <= 0) return;
-    const plateauK = SPEED_PLATEAU[fade.speed];
+    const plateauK = speedValueToPlateauK(fade.speed);
     const { r, g, b } = hexToRgb(fade.color);
 
     let yOuter, yInner; // outer = transparent edge, inner = solid edge
@@ -289,7 +313,7 @@
   function avgFadeAlphaOverSpan(W, H, fade, y0, y1) {
     const scrimH = H * (fade.reach / 100);
     if (scrimH <= 0) return 0;
-    const plateauK = SPEED_PLATEAU[fade.speed];
+    const plateauK = speedValueToPlateauK(fade.speed);
     let zoneStart, zoneEnd; // zone in canvas y-coords, zoneStart = outer(0 alpha), zoneEnd = inner(full alpha)
     if (fade.direction === 'bottom') { zoneStart = H - scrimH; zoneEnd = H; }
     else { zoneStart = scrimH; zoneEnd = 0; }
@@ -405,7 +429,7 @@
   // ---------- logo drawing ----------
 
   function applyLogoCorner(corner) {
-    const margin = 0.06;
+    const margin = TEXT_MARGIN_FRAC;
     const sizeFrac = state.logo.sizePct / 100;
     const halfW = sizeFrac / 2;
     const aspect = state.logo.img ? state.logo.img.naturalHeight / state.logo.img.naturalWidth : 1;
@@ -415,6 +439,25 @@
     else if (corner === 'top-right') { state.logo.xPct = 1 - margin - halfW; state.logo.yPct = margin + halfH; }
     else if (corner === 'bottom-left') { state.logo.xPct = margin + halfW; state.logo.yPct = 1 - margin - halfH; }
     else { state.logo.xPct = 1 - margin - halfW; state.logo.yPct = 1 - margin - halfH; }
+  }
+
+  // clamp the logo's center x so its left/right edges never cross the same
+  // margin used by the text block; y is only kept fully inside the canvas
+  function clampLogoPosition(xPct, yPct) {
+    const sizeFrac = state.logo.sizePct / 100;
+    const halfW = sizeFrac / 2;
+    const aspect = state.logo.img ? state.logo.img.naturalHeight / state.logo.img.naturalWidth : 1;
+    const halfH = (sizeFrac * aspect) / 2 * (state.canvasW / state.canvasH);
+
+    const minX = TEXT_MARGIN_FRAC + halfW;
+    const maxX = 1 - TEXT_MARGIN_FRAC - halfW;
+    const clampedX = minX <= maxX ? Math.min(maxX, Math.max(minX, xPct)) : 0.5;
+
+    const minY = halfH;
+    const maxY = 1 - halfH;
+    const clampedY = minY <= maxY ? Math.min(maxY, Math.max(minY, yPct)) : 0.5;
+
+    return { xPct: clampedX, yPct: clampedY };
   }
 
   function suggestLogoCornerFromTextAlign(hAlign) {
@@ -443,6 +486,26 @@
     ctx.drawImage(state.logo.img, r.x, r.y, r.w, r.h);
   }
 
+  // ---------- logo margin guide lines (shown while dragging) ----------
+
+  let showLogoGuides = false;
+
+  function drawLogoGuides(W, H) {
+    if (!showLogoGuides) return;
+    const marginPx = W * TEXT_MARGIN_FRAC;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(108,99,255,0.9)';
+    ctx.lineWidth = Math.max(2, W * 0.002);
+    ctx.setLineDash([W * 0.012, W * 0.008]);
+    [marginPx, W - marginPx].forEach((x) => {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, H);
+      ctx.stroke();
+    });
+    ctx.restore();
+  }
+
   // ---------- safe zone overlay ----------
 
   function drawSafeZone(W, H) {
@@ -468,6 +531,7 @@
     drawFade(W, H, state.fade);
     const textBounds = drawTextBlock(W, H);
     drawLogo(W, H);
+    drawLogoGuides(W, H);
     drawSafeZone(W, H);
 
     updateLegibilityBanner(W, H, textBounds);
@@ -536,20 +600,27 @@
     if (!r) return;
     if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) {
       dragging = true;
+      showLogoGuides = true;
       canvas.setPointerCapture(e.pointerId);
+      render();
     }
   });
 
   canvas.addEventListener('pointermove', (e) => {
     if (!dragging) return;
     const p = clientToCanvas(e.clientX, e.clientY);
-    state.logo.xPct = Math.min(1, Math.max(0, p.x / state.canvasW));
-    state.logo.yPct = Math.min(1, Math.max(0, p.y / state.canvasH));
+    const clamped = clampLogoPosition(p.x / state.canvasW, p.y / state.canvasH);
+    state.logo.xPct = clamped.xPct;
+    state.logo.yPct = clamped.yPct;
     state.logo.manuallyPositioned = true;
     render();
   });
 
-  function endDrag(e) { dragging = false; }
+  function endDrag(e) {
+    dragging = false;
+    showLogoGuides = false;
+    render();
+  }
   canvas.addEventListener('pointerup', endDrag);
   canvas.addEventListener('pointercancel', endDrag);
 
@@ -606,6 +677,8 @@
     ['headline', 'subheader', 'other'].forEach(wireLayerPanel);
     document.getElementById('otherEnabled').checked = state.text.layers.other.enabled;
     document.getElementById('fadeColor').value = state.fade.color;
+    fadeSpeed.value = state.fade.speed;
+    fadeSpeedVal.textContent = speedValueToLabel(state.fade.speed);
 
     presetSelect.value = state.preset;
     applyPreset(state.preset);
