@@ -374,10 +374,11 @@
       <p class="hint-text">A subtle warm, amber colour grade for a heritage/vintage feel. Works well layered with grain and a light vignette.</p>
       <div class="control-row">
         <label>Film stock</label>
-        <div class="segmented" id="filmStock">
+        <div class="segmented segmented-2x2" id="filmStock">
           <button data-val="none" class="active">None</button>
           <button data-val="fuji">Fuji</button>
           <button data-val="techOptics">Tech optics</button>
+          <button data-val="frontier">Frontier</button>
         </div>
       </div>
       <div class="control-row" id="filmStockIntensityRow" style="display:none;">
@@ -413,8 +414,30 @@
         <input type="text" id="techOpticsHudText" value="REF 0X-114 / LENS: IRIDIUM / MAT: X-ALLOY" />
       </div>
       <p class="hint-text tech-optics-layer-row" id="techOpticsLayersHint" style="display:none;">Each Tech optics layer above can be switched off individually — e.g. keep the colour grade and aberration but drop the flare and HUD.</p>
+      <div class="control-row frontier-layer-row" id="frontierHalationRow" style="display:none;">
+        <label for="frontierHalation">Halation</label>
+        <input type="checkbox" id="frontierHalation" checked />
+      </div>
+      <div class="control-row frontier-layer-row" id="frontierGrainRow" style="display:none;">
+        <label for="frontierGrain">Grain</label>
+        <input type="checkbox" id="frontierGrain" checked />
+      </div>
+      <div class="control-row frontier-layer-row" id="frontierHazeRow" style="display:none;">
+        <label for="frontierHaze">Dust &amp; haze</label>
+        <input type="checkbox" id="frontierHaze" checked />
+      </div>
+      <div class="control-row frontier-layer-row" id="frontierFlareRow" style="display:none;">
+        <label for="frontierFlare">Sun flare</label>
+        <input type="checkbox" id="frontierFlare" />
+      </div>
+      <div class="control-row frontier-layer-row" id="frontierVignetteRow" style="display:none;">
+        <label for="frontierVignette">Vignette</label>
+        <input type="checkbox" id="frontierVignette" checked />
+      </div>
+      <p class="hint-text frontier-layer-row" id="frontierLayersHint" style="display:none;">Each Frontier layer above can be switched off individually. Sun flare defaults off — it's a fixed warm glow in the top-right corner, so it won't suit every crop.</p>
       <p class="hint-text">A Fujifilm-inspired colour-grade recipe: lifted, faded shadows with a cool teal cast, a soft highlight roll-off with a warm amber cast, and gently muted saturation — the classic "Fuji" film look, independent of the warm-tone slider above.</p>
       <p class="hint-text">"Tech optics" is a stylised late-'90s classified-hardware look: crushed blacks with a cold steel/silver split tone, chromatic aberration toward the frame edges, a chrome highlight bloom, fine grain, a cool anamorphic flare, a vignette, and an optional corner-bracket/grid/spec-text HUD (edit the text above to change the label).</p>
+      <p class="hint-text">"Frontier" is a warm, sun-baked vintage-western advertising look: golden-hour white balance, punched-up reds with muted olive greens and grey-teal blues, a faded-matte tone curve, a brown-shadow/cream-highlight split tone, red-orange halation off the highlights, warm grain, and a soft dust haze drifting down from the top.</p>
     </div>
 
   </section>

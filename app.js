@@ -85,7 +85,7 @@
       grainSize: 25, // 0-100, particle size: 0=finest, 100=coarsest
       vignette: 0,  // 0-100, darkened edges
       warmth: 0,    // 0-100, warm "heritage" colour-grade overlay
-      filmStock: 'none', // 'none' | 'fuji' | 'techOptics'
+      filmStock: 'none', // 'none' | 'fuji' | 'techOptics' | 'frontier'
       filmStockIntensity: 70, // 0-100, strength of the film-stock colour grade
       // per-layer on/off toggles for the Tech Optics pipeline -- each is a
       // separately switchable layer of that effect (see applyTechOptics)
@@ -96,6 +96,12 @@
       techOpticsVignette: true,
       techOpticsHud: true, // whether the Tech Optics corner-bracket/grid/spec-text overlay is shown
       techOpticsHudText: 'REF 0X-114 / LENS: IRIDIUM / MAT: X-ALLOY',
+      // per-layer on/off toggles for the Frontier pipeline (see applyFrontier)
+      frontierHalation: true,
+      frontierGrain: true,
+      frontierHaze: true,
+      frontierFlare: false, // sun flare defaults off per spec
+      frontierVignette: true,
     },
   };
 
@@ -846,15 +852,21 @@
   const techOpticsHudRow = document.getElementById('techOpticsHudRow');
   const techOpticsHudTextRow = document.getElementById('techOpticsHudTextRow');
   const techOpticsLayerRows = document.querySelectorAll('.tech-optics-layer-row');
+  const frontierLayerRows = document.querySelectorAll('.frontier-layer-row');
   function updateTechOpticsRowVisibility() {
     const showTechOptics = state.effects.filmStock === 'techOptics';
     techOpticsLayerRows.forEach((row) => { row.style.display = showTechOptics ? 'flex' : 'none'; });
     techOpticsHudTextRow.style.display = showTechOptics && state.effects.techOpticsHud ? 'flex' : 'none';
   }
+  function updateFrontierRowVisibility() {
+    const showFrontier = state.effects.filmStock === 'frontier';
+    frontierLayerRows.forEach((row) => { row.style.display = showFrontier ? 'flex' : 'none'; });
+  }
   wireSegmented('filmStock', (val) => {
     state.effects.filmStock = val;
     filmStockIntensityRow.style.display = val === 'none' ? 'none' : 'flex';
     updateTechOpticsRowVisibility();
+    updateFrontierRowVisibility();
     render();
   });
 
@@ -883,6 +895,14 @@
   techOpticsHudTextInput.addEventListener('input', () => {
     state.effects.techOpticsHudText = techOpticsHudTextInput.value;
     render();
+  });
+
+  // per-layer on/off toggles for the Frontier effect
+  ['Halation', 'Grain', 'Haze', 'Flare', 'Vignette'].forEach((name) => {
+    document.getElementById(`frontier${name}`).addEventListener('change', (e) => {
+      state.effects[`frontier${name}`] = e.target.checked;
+      render();
+    });
   });
 
   const logoSize = document.getElementById('logoSize');
@@ -1172,6 +1192,7 @@
   const getFadeNoiseLayer = makeNoiseLayerCache();
   const getEffectsNoiseLayer = makeNoiseLayerCache();
   const getTechOpticsNoiseLayer = makeNoiseLayerCache();
+  const getFrontierNoiseLayer = makeNoiseLayerCache();
 
   function drawFade(W, H, fade) {
     const scrimH = H * (fade.reach / 100);
@@ -1526,11 +1547,241 @@
     if (effects.techOpticsHud) applyTechOpticsHud(W, H, effects, scale);
   }
 
+  // ---------- "Frontier" -- a warm, sun-baked vintage-western advertising grade ----------
+  // Golden-hour white balance, selective colour (warm reds punched up, greens
+  // pushed toward olive and desaturated, blues pushed toward a desaturated
+  // teal-grey), a faded-matte tone curve, a brown-shadow/cream-highlight split
+  // tone, red-orange halation off the highlights, warm grain, a soft haze +
+  // dust drifting down from the top, an optional corner sun flare, and a
+  // wide warm-tinted vignette. Same 1080px-reference pixel scaling
+  // convention as Tech Optics, for the same reason (consistent look between
+  // the live preview and a hi-res export).
+  const FRONTIER_PRESET = {
+    warmShift: 18,      // 0-255-ish additive warm (R up / B down) shift
+    magentaShift: 5,    // additive magenta tint (R+B up a touch, G down)
+    redSatBoost: 0.25, redLumCut: 0.05,
+    greenHueShiftDeg: -15, greenSatCut: 0.30,
+    blueSatCut: 0.35, blueTealPull: 0.25,
+    blackLift: 0.06, highlightRolloff: 0.90,
+    shadowColor: [0x2b, 0x1a, 0x10], shadowStrength: 0.30,
+    highlightColor: [0xf3, 0xd9, 0xa4], highlightStrength: 0.25,
+    halationColor: [0xd2, 0x45, 0x2b], halationThreshold: 0.85, halationBlurPx: 16, halationOpacity: 0.20,
+    grainOpacity: 0.10,
+    hazeOpacity: 0.13, hazeColor: 'rgba(243,217,164,OPACITY)', dustColor: [243, 227, 195],
+    flareColor: 'rgba(255,194,122,OPACITY)', flareOpacity: 0.20,
+    vignetteColor: [0x1e, 0x12, 0x0a], vignetteOpacity: 0.30,
+  };
+
+  function rgbToHsl(r, g, b) {
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h = 0, s = 0;
+    const l = (max + min) / 2;
+    const d = max - min;
+    if (d > 0) {
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+      else if (max === g) h = ((b - r) / d + 2) / 6;
+      else h = ((r - g) / d + 4) / 6;
+    }
+    return [h, s, l];
+  }
+
+  function hslToRgb(h, s, l) {
+    if (s === 0) return [l, l, l];
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    const hue2rgb = (t) => {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    };
+    return [hue2rgb(h + 1 / 3), hue2rgb(h), hue2rgb(h - 1 / 3)];
+  }
+
+  function frontierGradePixel(r0, g0, b0, preset) {
+    // white balance
+    let r = r0 + preset.warmShift + preset.magentaShift;
+    let g = g0 - preset.magentaShift * 0.6;
+    let b = b0 - preset.warmShift + preset.magentaShift * 0.5;
+
+    // selective colour, in HSL
+    let [h, s, l] = rgbToHsl(Math.max(0, Math.min(255, r)) / 255, Math.max(0, Math.min(255, g)) / 255, Math.max(0, Math.min(255, b)) / 255);
+    const hueDeg = h * 360;
+    if (hueDeg < 45 || hueDeg >= 330) { // reds/oranges
+      s = Math.min(1, s * (1 + preset.redSatBoost));
+      l = Math.max(0, l - preset.redLumCut);
+    } else if (hueDeg >= 70 && hueDeg < 170) { // greens
+      h = (h + preset.greenHueShiftDeg / 360 + 1) % 1;
+      s = s * (1 - preset.greenSatCut);
+    } else if (hueDeg >= 170 && hueDeg < 260) { // blues/cyans
+      s = s * (1 - preset.blueSatCut);
+      const teal = 190 / 360;
+      h = h + (teal - h) * preset.blueTealPull;
+    }
+    [r, g, b] = hslToRgb(h, s, l).map((v) => v * 255);
+
+    // tone curve: lift blacks, soft-roll the highlights
+    const toCurve = (v) => {
+      let x = v / 255;
+      x = preset.blackLift + x * (1 - preset.blackLift); // lifted black point
+      if (x > preset.highlightRolloff) {
+        const over = (x - preset.highlightRolloff) / (1 - preset.highlightRolloff);
+        x = preset.highlightRolloff + (1 - preset.highlightRolloff) * (1 - Math.pow(1 - over, 2));
+      }
+      return x * 255;
+    };
+    r = toCurve(r); g = toCurve(g); b = toCurve(b);
+
+    // split tone, weighted slightly toward the highlights
+    const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    const shadowW = Math.max(0, Math.min(1, (0.4 - lum) / 0.4)) * preset.shadowStrength;
+    const highlightW = Math.max(0, Math.min(1, (lum - 0.55) / 0.45)) * preset.highlightStrength;
+    if (shadowW > 0) {
+      r += (preset.shadowColor[0] - r) * shadowW;
+      g += (preset.shadowColor[1] - g) * shadowW;
+      b += (preset.shadowColor[2] - b) * shadowW;
+    }
+    if (highlightW > 0) {
+      r += (preset.highlightColor[0] - r) * highlightW;
+      g += (preset.highlightColor[1] - g) * highlightW;
+      b += (preset.highlightColor[2] - b) * highlightW;
+    }
+    return [r, g, b];
+  }
+
+  function applyFrontierGrade(W, H, preset, amount) {
+    const imageData = ctx.getImageData(0, 0, W, H);
+    const d = imageData.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const [r, g, b] = frontierGradePixel(d[i], d[i + 1], d[i + 2], preset);
+      d[i] = d[i] + (r - d[i]) * amount;
+      d[i + 1] = d[i + 1] + (g - d[i + 1]) * amount;
+      d[i + 2] = d[i + 2] + (b - d[i + 2]) * amount;
+    }
+    ctx.putImageData(imageData, 0, 0);
+  }
+
+  function applyFrontierHalation(W, H, preset, amount, scale) {
+    const off = document.createElement('canvas');
+    off.width = W; off.height = H;
+    const octx = off.getContext('2d');
+    octx.drawImage(ctx.canvas, 0, 0);
+    const id = octx.getImageData(0, 0, W, H);
+    const d = id.data;
+    const [tr, tg, tb] = preset.halationColor;
+    for (let i = 0; i < d.length; i += 4) {
+      const lum = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 255;
+      const w = Math.max(0, Math.min(1, (lum - preset.halationThreshold) / (1 - preset.halationThreshold)));
+      d[i] = tr; d[i + 1] = tg; d[i + 2] = tb; d[i + 3] = 255 * w;
+    }
+    octx.putImageData(id, 0, 0);
+
+    ctx.save();
+    ctx.filter = `blur(${preset.halationBlurPx * scale}px)`;
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = preset.halationOpacity * amount;
+    ctx.drawImage(off, 0, 0);
+    ctx.restore();
+  }
+
+  function applyFrontierGrain(W, H, preset, amount, scale) {
+    const grainPx = Math.max(1, Math.round(2 * scale)); // 35mm-ish, slightly coarser than Tech Optics' fine grain
+    ctx.save();
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.globalAlpha = preset.grainOpacity * amount;
+    ctx.drawImage(getFrontierNoiseLayer(W, H, grainPx), 0, 0);
+    ctx.restore();
+  }
+
+  let frontierDustLayerCache = null; // { key, canvas } -- cached so specks don't re-randomise (flicker) on every render() call
+  function getFrontierDustLayer(W, H, preset) {
+    const key = `${W}x${H}`;
+    if (frontierDustLayerCache && frontierDustLayerCache.key === key) return frontierDustLayerCache.canvas;
+    const layer = document.createElement('canvas');
+    layer.width = W; layer.height = H;
+    const lctx = layer.getContext('2d');
+    const [dr, dg, db] = preset.dustColor;
+    const count = Math.max(20, Math.round((W * H) / 9000));
+    for (let i = 0; i < count; i++) {
+      const x = Math.random() * W, y = Math.random() * H;
+      const r = (0.4 + Math.random() * 1.4) * (W / 1080);
+      lctx.beginPath();
+      lctx.fillStyle = `rgba(${dr},${dg},${db},${(0.15 + Math.random() * 0.25).toFixed(3)})`;
+      lctx.arc(x, y, r, 0, Math.PI * 2);
+      lctx.fill();
+    }
+    frontierDustLayerCache = { key, canvas: layer };
+    return layer;
+  }
+
+  function applyFrontierHaze(W, H, preset, amount) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = preset.hazeOpacity * amount;
+    const grad = ctx.createLinearGradient(0, 0, 0, H * 0.55);
+    grad.addColorStop(0, preset.hazeColor.replace('OPACITY', '0.9'));
+    grad.addColorStop(1, preset.hazeColor.replace('OPACITY', '0'));
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H * 0.55);
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = 0.6 * amount;
+    ctx.drawImage(getFrontierDustLayer(W, H, preset), 0, 0);
+    ctx.restore();
+  }
+
+  function applyFrontierFlare(W, H, preset, amount) {
+    const cx = W * 0.85, cy = H * 0.12, r = W * 0.35;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    grad.addColorStop(0, preset.flareColor.replace('OPACITY', '0.9'));
+    grad.addColorStop(1, preset.flareColor.replace('OPACITY', '0'));
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = preset.flareOpacity * amount;
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  function applyFrontierVignette(W, H, preset, amount) {
+    const cx = W / 2, cy = H / 2;
+    const outerR = Math.sqrt(cx * cx + cy * cy);
+    const [vr, vg, vb] = preset.vignetteColor;
+    const grad = ctx.createRadialGradient(cx, cy, outerR * 0.6, cx, cy, outerR); // wide feather: starts further out than Tech Optics' vignette
+    grad.addColorStop(0, `rgba(${vr},${vg},${vb},0)`);
+    grad.addColorStop(1, `rgba(${vr},${vg},${vb},${preset.vignetteOpacity * amount})`);
+    ctx.save();
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  function applyFrontier(W, H, effects) {
+    if (effects.filmStock !== 'frontier') return;
+    const amount = (typeof effects.filmStockIntensity === 'number' ? effects.filmStockIntensity : 70) / 100;
+    if (amount <= 0) return;
+    const scale = W / 1080;
+    const preset = FRONTIER_PRESET;
+
+    applyFrontierGrade(W, H, preset, amount);
+    if (effects.frontierHalation) applyFrontierHalation(W, H, preset, amount, scale);
+    if (effects.frontierGrain) applyFrontierGrain(W, H, preset, amount, scale);
+    if (effects.frontierHaze) applyFrontierHaze(W, H, preset, amount);
+    if (effects.frontierFlare) applyFrontierFlare(W, H, preset, amount);
+    if (effects.frontierVignette) applyFrontierVignette(W, H, preset, amount);
+  }
+
   // ---------- whole-composite effects (Effects tab): film stock, warmth, vignette, grain ----------
 
   function drawEffects(W, H, effects) {
     applyFilmStock(W, H, effects);
     applyTechOptics(W, H, effects);
+    applyFrontier(W, H, effects);
     if (effects.warmth > 0) {
       ctx.save();
       ctx.globalCompositeOperation = 'soft-light';
@@ -2396,6 +2647,10 @@
       document.getElementById(`techOptics${name}`).checked = state.effects[`techOptics${name}`];
     });
     techOpticsHudTextInput.value = state.effects.techOpticsHudText;
+    updateFrontierRowVisibility();
+    ['Halation', 'Grain', 'Haze', 'Flare', 'Vignette'].forEach((name) => {
+      document.getElementById(`frontier${name}`).checked = state.effects[`frontier${name}`];
+    });
 
     logoSize.value = state.logo.sizePct;
     logoSizeVal.textContent = `${state.logo.sizePct}%`;
