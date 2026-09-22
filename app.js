@@ -67,6 +67,7 @@
       speed: 60, // 0-100, see speedValueToPlateauK
       intensity: 100, // 0-100, scales the max opacity the fade ever reaches
       color: '#000000',
+      textured: false, // subtle grain/mottling, masked to the fade's own alpha
     },
     text: {
       hAlign: 'center',
@@ -726,6 +727,11 @@
     render();
   });
 
+  document.getElementById('fadeTextured').addEventListener('change', (e) => {
+    state.fade.textured = e.target.checked;
+    render();
+  });
+
   const logoSize = document.getElementById('logoSize');
   const logoSizeVal = document.getElementById('logoSizeVal');
   logoSize.addEventListener('input', () => {
@@ -927,6 +933,61 @@
     return t * t * (3 - 2 * t); // smoothstep
   }
 
+  // a tileable grain/mottling texture, generated once and reused (a
+  // CanvasPattern isn't tied to the context that created it, so this is
+  // safe to reuse on both the preview and the offscreen export contexts)
+  // builds noise at the exact target size (not a small tiled pattern) so the
+  // mottling never visibly repeats, however large the export gets. Cached by
+  // size, since the same size is drawn repeatedly during ordinary editing.
+  let cachedNoiseLayer = null; // { w, h, canvas }
+  function getNoiseLayer(w, h) {
+    if (cachedNoiseLayer && cachedNoiseLayer.w === w && cachedNoiseLayer.h === h) {
+      return cachedNoiseLayer.canvas;
+    }
+    const layer = document.createElement('canvas');
+    layer.width = w;
+    layer.height = h;
+    const nctx = layer.getContext('2d');
+
+    // coarse mottling: low-res noise upscaled with smoothing across the
+    // full target size, for soft organic blotches (like leather/paper)
+    const cellPx = 18; // approx blotch size in px, regardless of canvas size
+    const coarseW = Math.max(2, Math.round(w / cellPx));
+    const coarseH = Math.max(2, Math.round(h / cellPx));
+    const coarse = document.createElement('canvas');
+    coarse.width = coarseW;
+    coarse.height = coarseH;
+    const cctx = coarse.getContext('2d');
+    const cData = cctx.createImageData(coarseW, coarseH);
+    for (let i = 0; i < cData.data.length; i += 4) {
+      const v = Math.floor(Math.random() * 255);
+      cData.data[i] = v; cData.data[i + 1] = v; cData.data[i + 2] = v; cData.data[i + 3] = 255;
+    }
+    cctx.putImageData(cData, 0, 0);
+    nctx.imageSmoothingEnabled = true;
+    nctx.globalAlpha = 0.1;
+    nctx.drawImage(coarse, 0, 0, w, h);
+    nctx.globalAlpha = 1;
+
+    // fine grain speckle on top, drawn via a second canvas so it blends
+    // (source-over) with the mottling instead of replacing it
+    const fine = document.createElement('canvas');
+    fine.width = w;
+    fine.height = h;
+    const fctx = fine.getContext('2d');
+    const fData = fctx.createImageData(w, h);
+    for (let i = 0; i < fData.data.length; i += 4) {
+      const v = Math.random() < 0.5 ? 0 : 255;
+      fData.data[i] = v; fData.data[i + 1] = v; fData.data[i + 2] = v;
+      fData.data[i + 3] = Math.random() * 22;
+    }
+    fctx.putImageData(fData, 0, 0);
+    nctx.drawImage(fine, 0, 0);
+
+    cachedNoiseLayer = { w, h, canvas: layer };
+    return layer;
+  }
+
   function drawFade(W, H, fade) {
     const scrimH = H * (fade.reach / 100);
     if (scrimH <= 0) return;
@@ -942,16 +1003,34 @@
       yOuter = scrimH;
       yInner = 0;
     }
+    const rectY = Math.min(yOuter, yInner);
 
-    const grad = ctx.createLinearGradient(0, yOuter, 0, yInner);
+    // build the gradient on its own transparent layer first (rather than
+    // straight onto the already-opaque photo) so an optional texture pass
+    // can key off the gradient's *own* alpha and taper with it exactly --
+    // compositing over an opaque photo would flatten every pixel's alpha
+    // to 1, breaking that falloff.
+    const layer = document.createElement('canvas');
+    layer.width = W;
+    layer.height = scrimH;
+    const lctx = layer.getContext('2d');
+
+    const grad = lctx.createLinearGradient(0, yOuter - rectY, 0, yInner - rectY);
     const steps = 48;
     for (let s = 0; s <= steps; s++) {
       const frac = s / steps;
       const alpha = fadeAlphaAt(frac, plateauK) * intensity;
       grad.addColorStop(frac, `rgba(${r},${g},${b},${alpha})`);
     }
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, Math.min(yOuter, yInner), W, scrimH);
+    lctx.fillStyle = grad;
+    lctx.fillRect(0, 0, W, scrimH);
+
+    if (fade.textured) {
+      lctx.globalCompositeOperation = 'source-atop';
+      lctx.drawImage(getNoiseLayer(W, scrimH), 0, 0);
+    }
+
+    ctx.drawImage(layer, 0, rectY);
   }
 
   // average fade alpha across a vertical span [y0,y1] (for legibility check)
@@ -1537,6 +1616,7 @@
     fadeIntensity.value = state.fade.intensity;
     fadeIntensityVal.textContent = `${state.fade.intensity}%`;
     document.getElementById('fadeColor').value = state.fade.color;
+    document.getElementById('fadeTextured').checked = state.fade.textured;
 
     logoSize.value = state.logo.sizePct;
     logoSizeVal.textContent = `${state.logo.sizePct}%`;
