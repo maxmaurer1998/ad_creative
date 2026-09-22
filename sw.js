@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ad-creative-v1';
+const CACHE_NAME = 'ad-creative-v2';
 
 const PRECACHE_URLS = [
   './',
@@ -42,6 +42,24 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+
+  // Page navigations (loading index.html) go network-first, so a change on
+  // the server shows up the moment you're online -- falling back to the
+  // cached shell only when offline. Everything else (fonts, icons, css/js
+  // referenced by that fresh HTML) stays cache-first for offline/speed.
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          return response;
+        })
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match('./index.html')))
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;

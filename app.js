@@ -903,7 +903,19 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js').catch(() => {});
+        navigator.serviceWorker.register('sw.js')
+          .then((reg) => reg.update().catch(() => {}))
+          .catch(() => {});
+      });
+
+      // once a new service worker takes over, reload so the page picks up
+      // the fresh HTML/JS it just installed, instead of staying stuck on
+      // whatever was already loaded
+      let reloadedForUpdate = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (reloadedForUpdate) return;
+        reloadedForUpdate = true;
+        window.location.reload();
       });
     }
 
