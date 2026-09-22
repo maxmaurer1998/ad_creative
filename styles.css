@@ -184,6 +184,12 @@ html, body {
 }
 .legibility-banner.hidden { display: none; }
 
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .tabbar {
   display: flex;
   background: var(--panel-bg);
@@ -474,7 +480,39 @@ input[type="checkbox"] {
 
 @media (min-width: 820px) {
   .stage-wrap { padding: 24px; }
-  .panels { max-height: none; width: 380px; border-top: none; border-left: 1px solid var(--border); overflow-y: auto; }
   #app { flex-direction: row; }
   .main-col { min-width: 0; }
+
+  .sidebar {
+    width: 380px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--border);
+  }
+  .tabbar { border-top: none; border-bottom: 1px solid var(--border); }
+  .panels {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    border-top: none;
+    overflow-y: auto;
+  }
+
+  .library-header, .library-actions, .library-list {
+    width: 100%;
+    max-width: 640px;
+    margin: 0 auto;
+    box-sizing: border-box;
+  }
+}
+
+/* mouse-hover affordances -- gated on (hover: hover) so touch devices
+   (which report a persistent "hover" after tapping) never get stuck states */
+@media (hover: hover) {
+  .btn-secondary:hover:not(:disabled) { background: #262630; border-color: #3a3a44; }
+  .btn-primary:hover:not(:disabled) { background: var(--accent-2); }
+  .tab-btn:hover:not(.active) { color: var(--text); }
+  .layer-tab:hover:not(.active) { color: var(--text); border-color: #3a3a44; }
+  .segmented button:hover:not(.active) { color: var(--text); }
+  .library-row-name:hover { color: var(--accent); }
+  .upload-tile:hover { border-color: var(--accent); color: var(--text); }
 }
