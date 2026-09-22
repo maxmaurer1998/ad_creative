@@ -76,7 +76,7 @@
       vAlign: 100, // 0=top .. 100=bottom, continuous
       layers: {
         headline:  { text: 'New Season, New Look', font: 'playfair', size: 72, color: '#ffffff' },
-        subheader: { text: 'Shop the collection today', font: 'worksans', size: 36, color: '#ffffff' },
+        subheader: { text: 'Shop the collection today', font: 'worksans', size: 36, color: '#ffffff', enabled: true },
         other:     { text: 'Limited time only', font: 'worksans', size: 24, color: '#ffffff', enabled: false },
       },
     },
@@ -276,6 +276,7 @@
           if (recipe.text.layers[k]) Object.assign(state.text.layers[k], recipe.text.layers[k]);
         }
       }
+      if (typeof state.text.layers.subheader.enabled !== 'boolean') state.text.layers.subheader.enabled = true; // pre-subheaderEnabled recipes
     }
     if (recipe.logo) {
       const { xPct, yPct, sizePct, manuallyPositioned, colorMode, customColor, matchFadeColor } = recipe.logo;
@@ -872,6 +873,11 @@
     render();
   });
 
+  document.getElementById('subheaderEnabled').addEventListener('change', (e) => {
+    state.text.layers.subheader.enabled = e.target.checked;
+    render();
+  });
+
   const textVPos = document.getElementById('textVPos');
   textVPos.addEventListener('input', () => {
     state.text.vAlign = Number(textVPos.value);
@@ -1204,7 +1210,7 @@
     const order = ['headline', 'subheader', 'other'];
     return order
       .map(k => ({ key: k, ...state.text.layers[k] }))
-      .filter(l => l.key !== 'other' ? l.text.trim().length > 0 : (l.enabled && l.text.trim().length > 0));
+      .filter(l => l.key === 'headline' ? l.text.trim().length > 0 : (l.enabled && l.text.trim().length > 0));
   }
 
   function buildTextBlock(W, H) {
@@ -1891,6 +1897,7 @@
   function syncAllControlsFromState() {
     ['headline', 'subheader', 'other'].forEach(syncLayerPanel);
     document.getElementById('otherEnabled').checked = state.text.layers.other.enabled;
+    document.getElementById('subheaderEnabled').checked = state.text.layers.subheader.enabled;
 
     setSegmentedActive('fadeDirection', state.fade.direction);
     setSegmentedActive('textHAlign', state.text.hAlign);
