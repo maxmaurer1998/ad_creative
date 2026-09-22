@@ -80,7 +80,9 @@
   // ---------- DOM ----------
 
   const canvas = document.getElementById('previewCanvas');
-  const ctx = canvas.getContext('2d');
+  let ctx = canvas.getContext('2d'); // temporarily redirected to an offscreen hi-res context during export
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   const stage = document.getElementById('stage');
   const dropHint = document.getElementById('dropHint');
   const legibilityBanner = document.getElementById('legibilityBanner');
@@ -562,6 +564,9 @@
     state.canvasH = p.h;
     canvas.width = p.w;
     canvas.height = p.h;
+    // resizing a canvas resets its 2D context state, including smoothing quality
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     safeZoneRow.style.display = key === '1080x1920' ? 'flex' : 'none';
     fitStageToViewport();
     render();
@@ -884,8 +889,11 @@
 
   // ---------- master render ----------
 
-  function render() {
-    const W = state.canvasW, H = state.canvasH;
+  // draws the actual composite (photo + fade + text + logo) against whatever
+  // canvas `ctx` currently points to, at the given resolution. Editing aids
+  // (logo drag guides, the safe-zone guide) are in-app-only and are never
+  // baked into an export, regardless of whether they're toggled on.
+  function paintComposite(W, H, includeEditingAids) {
     ctx.clearRect(0, 0, W, H);
 
     if (state.image) {
@@ -898,9 +906,16 @@
     drawFade(W, H, state.fade);
     const textBounds = drawTextBlock(W, H);
     drawLogo(W, H);
-    drawLogoGuides(W, H);
-    drawSafeZone(W, H);
+    if (includeEditingAids) {
+      drawLogoGuides(W, H);
+      drawSafeZone(W, H);
+    }
+    return textBounds;
+  }
 
+  function render() {
+    const W = state.canvasW, H = state.canvasH;
+    const textBounds = paintComposite(W, H, true);
     updateLegibilityBanner(W, H, textBounds);
     scheduleSaveRecipe();
   }
@@ -1119,12 +1134,43 @@
 
   // ---------- export ----------
 
+  // scales the export up past the preset's baseline resolution when the
+  // photo's own cropped-in pixels have more detail than that baseline would
+  // capture, so the photo (and everything drawn on top of it) never gets
+  // downsampled below the source's native sharpness. Capped to stay well
+  // within mobile browsers' canvas memory limits.
+  const MAX_EXPORT_DIMENSION = 4096;
+  function computeExportScale() {
+    if (!state.image) return 1;
+    const { sw, sh } = getImageCropRect(state.image, state.canvasW, state.canvasH);
+    const neededScale = Math.max(sw / state.canvasW, sh / state.canvasH, 1);
+    const maxAllowedScale = MAX_EXPORT_DIMENSION / Math.max(state.canvasW, state.canvasH);
+    return Math.min(neededScale, maxAllowedScale);
+  }
+
   async function exportImage() {
     if (!state.image) return;
     exportBtn.disabled = true;
     exportBtn.textContent = 'Exporting…';
+    const previewCtx = ctx;
     try {
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      const scale = computeExportScale();
+      const exportW = Math.round(state.canvasW * scale);
+      const exportH = Math.round(state.canvasH * scale);
+
+      const offscreen = document.createElement('canvas');
+      offscreen.width = exportW;
+      offscreen.height = exportH;
+      try {
+        ctx = offscreen.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        paintComposite(exportW, exportH, false);
+      } finally {
+        ctx = previewCtx;
+      }
+
+      const blob = await new Promise(resolve => offscreen.toBlob(resolve, 'image/png'));
       if (!blob) throw new Error('toBlob failed');
       const file = new File([blob], `ad-creative-${Date.now()}.png`, { type: 'image/png' });
 
