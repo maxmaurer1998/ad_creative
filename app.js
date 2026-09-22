@@ -85,6 +85,8 @@
       grainSize: 25, // 0-100, particle size: 0=finest, 100=coarsest
       vignette: 0,  // 0-100, darkened edges
       warmth: 0,    // 0-100, warm "heritage" colour-grade overlay
+      filmStock: 'none', // 'none' | 'fuji'
+      filmStockIntensity: 70, // 0-100, strength of the film-stock colour grade
     },
   };
 
@@ -831,6 +833,21 @@
     render();
   });
 
+  const filmStockIntensityRow = document.getElementById('filmStockIntensityRow');
+  wireSegmented('filmStock', (val) => {
+    state.effects.filmStock = val;
+    filmStockIntensityRow.style.display = val === 'none' ? 'none' : 'flex';
+    render();
+  });
+
+  const filmStockIntensity = document.getElementById('filmStockIntensity');
+  const filmStockIntensityVal = document.getElementById('filmStockIntensityVal');
+  filmStockIntensity.addEventListener('input', () => {
+    state.effects.filmStockIntensity = Number(filmStockIntensity.value);
+    filmStockIntensityVal.textContent = `${state.effects.filmStockIntensity}%`;
+    render();
+  });
+
   const logoSize = document.getElementById('logoSize');
   const logoSizeVal = document.getElementById('logoSizeVal');
   logoSize.addEventListener('input', () => {
@@ -1066,7 +1083,10 @@
       // coarse mottling: low-res noise upscaled with smoothing across the
       // full target size, for soft organic blotches (like leather/paper).
       // Blotch size scales with grain size too -- bigger grain, bigger blotches.
-      const cellPx = 10 + grainPx * 5;
+      // The floor here (rather than a fixed ~15px minimum) is what lets the
+      // slider's low end read as genuinely fine/subtle instead of still
+      // showing soft blotches no matter how low it's turned down.
+      const cellPx = 4 + grainPx * 4;
       const coarseW = Math.max(2, Math.round(w / cellPx));
       const coarseH = Math.max(2, Math.round(h / cellPx));
       const coarse = document.createElement('canvas');
@@ -1163,9 +1183,81 @@
     ctx.drawImage(layer, 0, rectY);
   }
 
-  // ---------- whole-composite effects (Effects tab): warmth, vignette, grain ----------
+  // ---------- Fuji-inspired film-stock colour grade ----------
+  // Per-channel tone curves (lifted/faded blacks, soft highlight roll-off) plus a
+  // teal-shadow / amber-highlight split tone -- the classic Fujifilm colour-science
+  // recipe: raise the black point so shadows fade to grey rather than crush to
+  // pure black, gently compress the highlights instead of clipping to white, bias
+  // shadows cool/teal and highlights warm/amber, and mute the overall saturation
+  // a touch (closer to Fujifilm's muted, deep-green "Classic Chrome" rendering
+  // than to a punchy digital default).
+  const FILM_STOCK_CURVES = {
+    fuji: {
+      r: [[0, 0.035], [0.25, 0.24], [0.5, 0.50], [0.75, 0.76], [1, 0.965]],
+      g: [[0, 0.03], [0.25, 0.225], [0.5, 0.485], [0.75, 0.75], [1, 0.95]],
+      b: [[0, 0.06], [0.25, 0.245], [0.5, 0.49], [0.75, 0.72], [1, 0.90]],
+      desaturate: 0.14, // 0-1, blend fraction toward luminance
+    },
+  };
+
+  function buildCurveLut(points) {
+    const lut = new Uint8ClampedArray(256);
+    for (let i = 0; i < 256; i++) {
+      const x = i / 255;
+      let p0 = points[0], p1 = points[points.length - 1];
+      for (let j = 0; j < points.length - 1; j++) {
+        if (x >= points[j][0] && x <= points[j + 1][0]) { p0 = points[j]; p1 = points[j + 1]; break; }
+      }
+      const span = p1[0] - p0[0];
+      const t = span > 0 ? (x - p0[0]) / span : 0;
+      lut[i] = Math.round((p0[1] + (p1[1] - p0[1]) * t) * 255);
+    }
+    return lut;
+  }
+
+  let filmStockLutCache = null; // { key, lutR, lutG, lutB, desaturate }
+  function getFilmStockLuts(key) {
+    if (filmStockLutCache && filmStockLutCache.key === key) return filmStockLutCache;
+    const curves = FILM_STOCK_CURVES[key];
+    filmStockLutCache = {
+      key,
+      lutR: buildCurveLut(curves.r),
+      lutG: buildCurveLut(curves.g),
+      lutB: buildCurveLut(curves.b),
+      desaturate: curves.desaturate,
+    };
+    return filmStockLutCache;
+  }
+
+  function applyFilmStock(W, H, effects) {
+    const key = effects.filmStock;
+    if (!key || key === 'none' || !FILM_STOCK_CURVES[key]) return;
+    const amount = (typeof effects.filmStockIntensity === 'number' ? effects.filmStockIntensity : 70) / 100;
+    if (amount <= 0) return;
+
+    const { lutR, lutG, lutB, desaturate } = getFilmStockLuts(key);
+    const imageData = ctx.getImageData(0, 0, W, H);
+    const d = imageData.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const r0 = d[i], g0 = d[i + 1], b0 = d[i + 2];
+      let r = lutR[r0], g = lutG[g0], b = lutB[b0];
+      if (desaturate > 0) {
+        const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+        r += (lum - r) * desaturate;
+        g += (lum - g) * desaturate;
+        b += (lum - b) * desaturate;
+      }
+      d[i] = r0 + (r - r0) * amount;
+      d[i + 1] = g0 + (g - g0) * amount;
+      d[i + 2] = b0 + (b - b0) * amount;
+    }
+    ctx.putImageData(imageData, 0, 0);
+  }
+
+  // ---------- whole-composite effects (Effects tab): film stock, warmth, vignette, grain ----------
 
   function drawEffects(W, H, effects) {
+    applyFilmStock(W, H, effects);
     if (effects.warmth > 0) {
       ctx.save();
       ctx.globalCompositeOperation = 'soft-light';
@@ -2022,6 +2114,10 @@
     effectVignetteVal.textContent = `${state.effects.vignette}%`;
     effectWarmth.value = state.effects.warmth;
     effectWarmthVal.textContent = `${state.effects.warmth}%`;
+    setSegmentedActive('filmStock', state.effects.filmStock);
+    filmStockIntensityRow.style.display = state.effects.filmStock === 'none' ? 'none' : 'flex';
+    filmStockIntensity.value = state.effects.filmStockIntensity;
+    filmStockIntensityVal.textContent = `${state.effects.filmStockIntensity}%`;
 
     logoSize.value = state.logo.sizePct;
     logoSizeVal.textContent = `${state.logo.sizePct}%`;

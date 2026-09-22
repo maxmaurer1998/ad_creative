@@ -372,6 +372,18 @@
         <input type="range" id="effectWarmth" min="0" max="100" value="0" />
       </div>
       <p class="hint-text">A subtle warm, amber colour grade for a heritage/vintage feel. Works well layered with grain and a light vignette.</p>
+      <div class="control-row">
+        <label>Film stock</label>
+        <div class="segmented" id="filmStock">
+          <button data-val="none" class="active">None</button>
+          <button data-val="fuji">Fuji</button>
+        </div>
+      </div>
+      <div class="control-row" id="filmStockIntensityRow" style="display:none;">
+        <label for="filmStockIntensity">Strength <span id="filmStockIntensityVal">70%</span></label>
+        <input type="range" id="filmStockIntensity" min="0" max="100" value="70" />
+      </div>
+      <p class="hint-text">A Fujifilm-inspired colour-grade recipe: lifted, faded shadows with a cool teal cast, a soft highlight roll-off with a warm amber cast, and gently muted saturation — the classic "Fuji" film look, independent of the warm-tone slider above.</p>
     </div>
 
   </section>
