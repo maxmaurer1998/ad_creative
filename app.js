@@ -309,6 +309,28 @@
     });
   }
 
+  // The actual Blob/File currently loaded as the working photo/logo -- kept in
+  // sync by every path that sets state.image / state.logo.img (upload, opening
+  // a saved project, and restoring a session), so anything that needs "the
+  // blob behind what's on screen right now" (saving into the project library)
+  // reads this instead of re-fetching the session's own autosave KV entry,
+  // which only ever gets written by a fresh upload and would otherwise still
+  // hold a stale/unrelated blob after opening a different saved project.
+  let currentPhotoBlob = null;
+  let currentLogoBlob = null;
+
+  function setCurrentPhotoBlob(blob) {
+    currentPhotoBlob = blob || null;
+    if (blob) idbSet(IDB_STORE_KV, 'photoBlob', blob);
+    else idbDelete(IDB_STORE_KV, 'photoBlob');
+  }
+
+  function setCurrentLogoBlob(blob) {
+    currentLogoBlob = blob || null;
+    if (blob) idbSet(IDB_STORE_KV, 'logoBlob', blob);
+    else idbDelete(IDB_STORE_KV, 'logoBlob');
+  }
+
   async function restoreSession() {
     const [recipe, photoBlob, logoBlob, savedLogoBlob, imageTransform] = await Promise.all([
       idbGet(IDB_STORE_KV, 'recipe'),
@@ -324,6 +346,7 @@
       const img = await loadImageFromBlob(photoBlob);
       if (img) {
         state.image = img;
+        currentPhotoBlob = photoBlob;
         dropHint.classList.add('hidden');
         exportBtn.disabled = false;
         if (imageTransform && typeof imageTransform.zoom === 'number') {
@@ -336,7 +359,7 @@
     const effectiveLogoBlob = logoBlob || savedLogoBlob;
     if (effectiveLogoBlob) {
       const img = await loadImageFromBlob(effectiveLogoBlob);
-      if (img) state.logo.img = img;
+      if (img) { state.logo.img = img; currentLogoBlob = effectiveLogoBlob; }
     }
 
     return { hasRecipe: !!recipe };
@@ -576,10 +599,10 @@
     if (!name || !name.trim()) return;
 
     const thumbnailBlob = await makeThumbnail();
-    const photoBlob = await idbGet(IDB_STORE_KV, 'photoBlob');
+    const photoBlob = currentPhotoBlob;
     let logoBlob = null;
     if (state.logo.img) {
-      logoBlob = (await idbGet(IDB_STORE_KV, 'logoBlob')) || (await idbGet(IDB_STORE_KV, 'savedLogo')) || null;
+      logoBlob = currentLogoBlob || (await idbGet(IDB_STORE_KV, 'savedLogo')) || null;
     }
 
     const project = {
@@ -606,20 +629,31 @@
         const img = await loadImageFromBlob(project.photoBlob);
         if (img) {
           state.image = img;
+          setCurrentPhotoBlob(project.photoBlob);
           dropHint.classList.add('hidden');
           exportBtn.disabled = false;
         } else {
           state.image = null;
+          setCurrentPhotoBlob(null);
           dropHint.classList.remove('hidden');
           exportBtn.disabled = true;
+          alert('This project\'s saved photo is damaged and could not be loaded. Its other settings (text, fade, logo) were still restored -- upload the photo again and re-save.');
         }
       } else {
         state.image = null;
+        setCurrentPhotoBlob(null);
         dropHint.classList.remove('hidden');
         exportBtn.disabled = true;
+        alert('This project was saved without a photo, so the canvas is blank. Its other settings (text, fade, logo) were still restored -- upload a photo and re-save to fix it going forward.');
       }
 
-      state.logo.img = project.logoBlob ? await loadImageFromBlob(project.logoBlob) : null;
+      if (project.logoBlob) {
+        state.logo.img = await loadImageFromBlob(project.logoBlob);
+        setCurrentLogoBlob(state.logo.img ? project.logoBlob : null);
+      } else {
+        state.logo.img = null;
+        setCurrentLogoBlob(null);
+      }
 
       if (project.recipe) applyRecipeToState(project.recipe);
       if (project.imageTransform && typeof project.imageTransform.zoom === 'number') {
@@ -981,7 +1015,7 @@
       exportBtn.disabled = false;
       render();
     });
-    idbSet(IDB_STORE_KV, 'photoBlob', file);
+    setCurrentPhotoBlob(file);
   });
 
   logoInput.addEventListener('change', () => {
@@ -991,7 +1025,7 @@
       state.logo.img = img;
       render();
     });
-    idbSet(IDB_STORE_KV, 'logoBlob', file);
+    setCurrentLogoBlob(file);
   });
 
   // ---------- fade drawing ----------
