@@ -41,6 +41,7 @@
 
   <nav class="tabbar" id="tabbar">
     <button class="tab-btn active" data-panel="panel-canvas">Canvas</button>
+    <button class="tab-btn" data-panel="panel-position">Position</button>
     <button class="tab-btn" data-panel="panel-fade">Fade</button>
     <button class="tab-btn" data-panel="panel-text">Text</button>
     <button class="tab-btn" data-panel="panel-logo">Logo</button>
@@ -94,6 +95,18 @@
         <button id="deleteRecipeBtn" class="btn btn-secondary">Delete</button>
       </div>
       <p class="hint-text">Save your current fade/text/logo setup as a named template (not the photo itself), then apply it again later on a different photo.</p>
+    </div>
+
+    <!-- POSITION (PHOTO PAN/ZOOM) PANEL -->
+    <div class="panel" id="panel-position">
+      <div class="control-row">
+        <label for="imageZoom">Zoom <span id="imageZoomVal">100%</span></label>
+        <input type="range" id="imageZoom" min="100" max="400" value="100" />
+      </div>
+      <div class="control-row">
+        <button id="resetImagePositionBtn" class="btn btn-secondary">Reset position</button>
+      </div>
+      <p class="hint-text">While this tab is open, drag directly on the photo to reposition it, and pinch (or use the Zoom slider) to zoom in. The photo locks in place again as soon as you switch to another tab.</p>
     </div>
 
     <!-- FADE PANEL -->
@@ -230,10 +243,18 @@
         <input type="range" id="logoSize" min="5" max="50" value="18" />
       </div>
       <div class="control-row">
-        <label for="logoMatchFade">Match fade colour</label>
-        <input type="checkbox" id="logoMatchFade" />
+        <label>Logo colour</label>
+        <div class="segmented" id="logoColorMode">
+          <button data-val="original" class="active">Original</button>
+          <button data-val="custom">Custom</button>
+          <button data-val="fade">Match fade</button>
+        </div>
       </div>
-      <p class="hint-text">Tints the logo's opaque pixels to the fade colour. Works well for a single-colour/silhouette logo; a multi-colour logo will lose its original colours when this is on.</p>
+      <div class="control-row" id="logoCustomColorRow" style="display:none;">
+        <label for="logoCustomColor">Tint colour</label>
+        <input type="color" id="logoCustomColor" value="#ffffff" />
+      </div>
+      <p class="hint-text">Tints the logo's opaque pixels: "Custom" uses the colour you pick, "Match fade" always tracks the current fade colour. Works well for a single-colour/silhouette logo; a multi-colour logo will lose its original colours when either is on.</p>
       <p class="hint-text">Drag the logo directly on the canvas to fine-tune its position. Guide lines appear while dragging — the logo can't be dragged past the same left/right margin as the text, at any size.</p>
       <div class="control-row">
         <label>Default logo</label>

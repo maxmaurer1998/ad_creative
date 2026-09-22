@@ -112,6 +112,16 @@ html, body {
   overflow: hidden;
 }
 
+.stage.position-edit-mode {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.stage.position-edit-mode #previewCanvas {
+  cursor: grab;
+}
+.stage.position-edit-mode #previewCanvas:active {
+  cursor: grabbing;
+}
+
 #previewCanvas {
   display: block;
   max-width: 100%;

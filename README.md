@@ -17,10 +17,11 @@ For the "Add to Home Screen" / installable PWA behaviour and the Web Share API "
 ## What's implemented
 
 - Upload a photo, pick a canvas preset (Feed 4:5, Feed 1:1, Story/Reels 9:16, Facebook link ad)
+- Position tab: pinch/drag (or a zoom slider) to pan and zoom the photo within the canvas. Only active while that tab is open — the photo locks in place as soon as you switch tabs, so drags elsewhere can't accidentally move it
 - Fade overlay: direction (top/bottom), reach, speed-to-solid, and an intensity cap (so the darkest point can be dialled down to a light tint instead of ever becoming a fully solid block), colour — using the smoothstep + plateau easing so the fade always blends to 0% opacity at its outer edge
 - Three independent text layers (headline, subheader, optional "other" line), each with font, size, colour; horizontal alignment and a continuous vertical-position slider apply to the stacked text block as a whole, always staying inside the top/bottom edge padding
 - Inline legibility warning banner when the text block sits over an insufficiently-faded area
-- Logo upload with drag-to-position on canvas (clamped to the same side margin as the text at any size, with guide lines while dragging), corner + center position presets, and an optional "match fade colour" tint
+- Logo upload with drag-to-position on canvas (clamped to the same side margin as the text at any size, with guide lines while dragging), corner + center position presets, and a colour choice: keep the logo's original colours, tint it to a custom colour you pick, or tint it to always match the current fade colour
 - A persistent "default logo" (separate from the working session) that's saved once and then loads automatically in future sessions, surviving "Clear saved session"
 - Adjustable side margin, shared by the text block width and the logo drag clamp
 - Story/Reels safe-zone overlay toggle

@@ -46,13 +46,16 @@
     safeZone: false,
     marginFrac: DEFAULT_MARGIN_FRAC, // left/right margin, shared by text wrap and logo drag clamp
     image: null,   // HTMLImageElement
+    imageTransform: { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5 }, // pan/zoom, tied to this specific photo
+    positionEditMode: false, // true only while the Position tab is open
     logo: {
       img: null,
       xPct: 0.82,   // center x, fraction of canvas width
       yPct: 0.88,   // center y, fraction of canvas height
       sizePct: 18,  // width as % of canvas width
       manuallyPositioned: false,
-      matchFadeColor: false,
+      colorMode: 'original', // 'original' | 'custom' | 'fade'
+      customColor: '#ffffff',
     },
     fade: {
       direction: 'bottom',
@@ -185,7 +188,8 @@
         yPct: state.logo.yPct,
         sizePct: state.logo.sizePct,
         manuallyPositioned: state.logo.manuallyPositioned,
-        matchFadeColor: state.logo.matchFadeColor,
+        colorMode: state.logo.colorMode,
+        customColor: state.logo.customColor,
       },
     };
   }
@@ -213,19 +217,24 @@
       }
     }
     if (recipe.logo) {
-      const { xPct, yPct, sizePct, manuallyPositioned, matchFadeColor } = recipe.logo;
+      const { xPct, yPct, sizePct, manuallyPositioned, colorMode, customColor, matchFadeColor } = recipe.logo;
       if (typeof xPct === 'number') state.logo.xPct = xPct;
       if (typeof yPct === 'number') state.logo.yPct = yPct;
       if (typeof sizePct === 'number') state.logo.sizePct = sizePct;
       if (typeof manuallyPositioned === 'boolean') state.logo.manuallyPositioned = manuallyPositioned;
-      if (typeof matchFadeColor === 'boolean') state.logo.matchFadeColor = matchFadeColor;
+      if (typeof customColor === 'string') state.logo.customColor = customColor;
+      if (typeof colorMode === 'string') state.logo.colorMode = colorMode;
+      else if (typeof matchFadeColor === 'boolean') state.logo.colorMode = matchFadeColor ? 'fade' : 'original'; // pre-colorMode recipes
     }
   }
 
   let saveRecipeTimer = null;
   function scheduleSaveRecipe() {
     clearTimeout(saveRecipeTimer);
-    saveRecipeTimer = setTimeout(() => { idbSet(IDB_STORE_KV, 'recipe', serializeRecipe()); }, 400);
+    saveRecipeTimer = setTimeout(() => {
+      idbSet(IDB_STORE_KV, 'recipe', serializeRecipe());
+      idbSet(IDB_STORE_KV, 'imageTransform', state.imageTransform);
+    }, 400);
   }
 
   function loadImageFromBlob(blob) {
@@ -239,11 +248,12 @@
   }
 
   async function restoreSession() {
-    const [recipe, photoBlob, logoBlob, savedLogoBlob] = await Promise.all([
+    const [recipe, photoBlob, logoBlob, savedLogoBlob, imageTransform] = await Promise.all([
       idbGet(IDB_STORE_KV, 'recipe'),
       idbGet(IDB_STORE_KV, 'photoBlob'),
       idbGet(IDB_STORE_KV, 'logoBlob'),
       idbGet(IDB_STORE_KV, 'savedLogo'),
+      idbGet(IDB_STORE_KV, 'imageTransform'),
     ]);
 
     if (recipe) applyRecipeToState(recipe);
@@ -254,6 +264,9 @@
         state.image = img;
         dropHint.classList.add('hidden');
         exportBtn.disabled = false;
+        if (imageTransform && typeof imageTransform.zoom === 'number') {
+          state.imageTransform = imageTransform;
+        }
       }
     }
     // prefer this session's own logo; fall back to the persistently-saved
@@ -273,6 +286,7 @@
     await idbDelete(IDB_STORE_KV, 'recipe');
     await idbDelete(IDB_STORE_KV, 'photoBlob');
     await idbDelete(IDB_STORE_KV, 'logoBlob');
+    await idbDelete(IDB_STORE_KV, 'imageTransform');
     try { localStorage.removeItem(LS_KEY); } catch (e) { /* ignore */ }
     location.reload();
   }
@@ -374,6 +388,11 @@
     if (!btn) return;
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
     document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === btn.dataset.panel));
+
+    // the photo can only be panned/zoomed while its own tab is open -- it's
+    // locked everywhere else, per the request that it "fixes/locks" when off
+    state.positionEditMode = btn.dataset.panel === 'panel-position';
+    stage.classList.toggle('position-edit-mode', state.positionEditMode);
   });
 
   document.getElementById('layerTabs').addEventListener('click', (e) => {
@@ -440,8 +459,30 @@
     render();
   });
 
-  document.getElementById('logoMatchFade').addEventListener('change', (e) => {
-    state.logo.matchFadeColor = e.target.checked;
+  const logoCustomColorRow = document.getElementById('logoCustomColorRow');
+  wireSegmented('logoColorMode', (val) => {
+    state.logo.colorMode = val;
+    logoCustomColorRow.style.display = val === 'custom' ? 'flex' : 'none';
+    render();
+  });
+
+  document.getElementById('logoCustomColor').addEventListener('input', (e) => {
+    state.logo.customColor = e.target.value;
+    render();
+  });
+
+  const imageZoom = document.getElementById('imageZoom');
+  const imageZoomVal = document.getElementById('imageZoomVal');
+  imageZoom.addEventListener('input', () => {
+    setImageZoom(Number(imageZoom.value) / 100);
+    imageZoomVal.textContent = `${imageZoom.value}%`;
+    render();
+  });
+
+  document.getElementById('resetImagePositionBtn').addEventListener('click', () => {
+    state.imageTransform = { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5 };
+    imageZoom.value = 100;
+    imageZoomVal.textContent = '100%';
     render();
   });
 
@@ -541,6 +582,9 @@
     if (!file) return;
     loadImageFile(file, (img) => {
       state.image = img;
+      state.imageTransform = { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5 }; // reset crop for the new photo
+      imageZoom.value = 100;
+      imageZoomVal.textContent = '100%';
       dropHint.classList.add('hidden');
       exportBtn.disabled = false;
       render();
@@ -801,9 +845,9 @@
   function drawLogo(W, H) {
     if (!state.logo.img) return;
     const r = logoRect(W, H);
-    const source = state.logo.matchFadeColor
-      ? getTintedLogo(state.logo.img, state.fade.color)
-      : state.logo.img;
+    let source = state.logo.img;
+    if (state.logo.colorMode === 'fade') source = getTintedLogo(state.logo.img, state.fade.color);
+    else if (state.logo.colorMode === 'custom') source = getTintedLogo(state.logo.img, state.logo.customColor);
     ctx.drawImage(source, r.x, r.y, r.w, r.h);
   }
 
@@ -859,21 +903,40 @@
     scheduleSaveRecipe();
   }
 
-  function drawImageCover(img, W, H) {
+  // the "cover fit" crop size at zoom=1 (no zoom), matching the canvas aspect ratio
+  function getBaseCropSize(img, W, H) {
     const ir = img.naturalWidth / img.naturalHeight;
     const cr = W / H;
-    let sw, sh, sx, sy;
-    if (ir > cr) {
-      sh = img.naturalHeight;
-      sw = sh * cr;
-      sx = (img.naturalWidth - sw) / 2;
-      sy = 0;
-    } else {
-      sw = img.naturalWidth;
-      sh = sw / cr;
-      sx = 0;
-      sy = (img.naturalHeight - sh) / 2;
-    }
+    if (ir > cr) return { baseSw: img.naturalHeight * cr, baseSh: img.naturalHeight };
+    return { baseSw: img.naturalWidth, baseSh: img.naturalWidth / cr };
+  }
+
+  // clamps a pan offset (fraction of the source image) so the current zoom's
+  // crop rectangle never goes outside the source image bounds
+  function clampImageOffset(offsetXPct, offsetYPct, zoom, img, W, H) {
+    const { baseSw, baseSh } = getBaseCropSize(img, W, H);
+    const halfWFrac = (baseSw / zoom / 2) / img.naturalWidth;
+    const halfHFrac = (baseSh / zoom / 2) / img.naturalHeight;
+    return {
+      offsetXPct: Math.min(Math.max(offsetXPct, halfWFrac), 1 - halfWFrac),
+      offsetYPct: Math.min(Math.max(offsetYPct, halfHFrac), 1 - halfHFrac),
+    };
+  }
+
+  function getImageCropRect(img, W, H) {
+    const { baseSw, baseSh } = getBaseCropSize(img, W, H);
+    const t = state.imageTransform;
+    const sw = baseSw / t.zoom;
+    const sh = baseSh / t.zoom;
+    const cx = t.offsetXPct * img.naturalWidth;
+    const cy = t.offsetYPct * img.naturalHeight;
+    const sx = Math.min(Math.max(cx - sw / 2, 0), img.naturalWidth - sw);
+    const sy = Math.min(Math.max(cy - sh / 2, 0), img.naturalHeight - sh);
+    return { sx, sy, sw, sh };
+  }
+
+  function drawImageCover(img, W, H) {
+    const { sx, sy, sw, sh } = getImageCropRect(img, W, H);
     ctx.drawImage(img, sx, sy, sw, sh, 0, 0, W, H);
   }
 
@@ -903,9 +966,14 @@
 
   window.addEventListener('resize', fitStageToViewport);
 
-  // ---------- logo drag ----------
+  // ---------- logo drag + photo pan/zoom (mode-exclusive on the canvas) ----------
 
-  let dragging = false;
+  let dragging = false; // logo drag
+  let photoDragging = false; // photo pan
+  let panStart = null; // { clientX, clientY, offsetXPct, offsetYPct }
+  const activePointers = new Map(); // pointerId -> {x, y}, for pinch-zoom
+  let pinchStartDist = 0;
+  let pinchStartZoom = 1;
 
   function clientToCanvas(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
@@ -914,7 +982,38 @@
     return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
   }
 
+  function setImageZoom(zoom) {
+    if (!state.image) return;
+    const clampedZoom = Math.min(4, Math.max(1, zoom));
+    state.imageTransform.zoom = clampedZoom;
+    const clamped = clampImageOffset(
+      state.imageTransform.offsetXPct, state.imageTransform.offsetYPct,
+      clampedZoom, state.image, state.canvasW, state.canvasH
+    );
+    state.imageTransform.offsetXPct = clamped.offsetXPct;
+    state.imageTransform.offsetYPct = clamped.offsetYPct;
+  }
+
   canvas.addEventListener('pointerdown', (e) => {
+    if (state.positionEditMode) {
+      if (!state.image) return;
+      canvas.setPointerCapture(e.pointerId);
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (activePointers.size === 1) {
+        photoDragging = true;
+        panStart = {
+          clientX: e.clientX, clientY: e.clientY,
+          offsetXPct: state.imageTransform.offsetXPct, offsetYPct: state.imageTransform.offsetYPct,
+        };
+      } else if (activePointers.size === 2) {
+        photoDragging = false;
+        const pts = [...activePointers.values()];
+        pinchStartDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        pinchStartZoom = state.imageTransform.zoom;
+      }
+      return;
+    }
+
     if (!state.logo.img) return;
     const p = clientToCanvas(e.clientX, e.clientY);
     const r = logoRect(state.canvasW, state.canvasH);
@@ -928,6 +1027,42 @@
   });
 
   canvas.addEventListener('pointermove', (e) => {
+    if (state.positionEditMode) {
+      if (!activePointers.has(e.pointerId)) return;
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (activePointers.size === 2) {
+        const pts = [...activePointers.values()];
+        const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        if (pinchStartDist > 0) {
+          setImageZoom(pinchStartZoom * (dist / pinchStartDist));
+          imageZoom.value = Math.round(state.imageTransform.zoom * 100);
+          imageZoomVal.textContent = `${imageZoom.value}%`;
+          render();
+        }
+        return;
+      }
+
+      if (photoDragging && panStart) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = state.canvasW / rect.width;
+        const scaleY = state.canvasH / rect.height;
+        const dxCanvas = (e.clientX - panStart.clientX) * scaleX;
+        const dyCanvas = (e.clientY - panStart.clientY) * scaleY;
+        const { sw, sh } = getImageCropRect(state.image, state.canvasW, state.canvasH);
+        const dxFrac = -(dxCanvas * sw / state.canvasW) / state.image.naturalWidth;
+        const dyFrac = -(dyCanvas * sh / state.canvasH) / state.image.naturalHeight;
+        const clamped = clampImageOffset(
+          panStart.offsetXPct + dxFrac, panStart.offsetYPct + dyFrac,
+          state.imageTransform.zoom, state.image, state.canvasW, state.canvasH
+        );
+        state.imageTransform.offsetXPct = clamped.offsetXPct;
+        state.imageTransform.offsetYPct = clamped.offsetYPct;
+        render();
+      }
+      return;
+    }
+
     if (!dragging) return;
     const p = clientToCanvas(e.clientX, e.clientY);
     const clamped = clampLogoPosition(p.x / state.canvasW, p.y / state.canvasH);
@@ -938,6 +1073,32 @@
   });
 
   function endDrag(e) {
+    if (state.positionEditMode) {
+      if (e && activePointers.has(e.pointerId)) {
+        activePointers.delete(e.pointerId);
+        if (activePointers.size === 0) {
+          photoDragging = false;
+          panStart = null;
+          pinchStartDist = 0;
+        } else if (activePointers.size === 1) {
+          // one finger lifted mid-pinch -- resume single-finger panning from here
+          const [pt] = [...activePointers.values()];
+          photoDragging = true;
+          panStart = {
+            clientX: pt.x, clientY: pt.y,
+            offsetXPct: state.imageTransform.offsetXPct, offsetYPct: state.imageTransform.offsetYPct,
+          };
+          pinchStartDist = 0;
+        }
+      } else {
+        activePointers.clear();
+        photoDragging = false;
+        panStart = null;
+        pinchStartDist = 0;
+      }
+      render();
+      return;
+    }
     dragging = false;
     showLogoGuides = false;
     render();
@@ -1014,10 +1175,15 @@
 
     logoSize.value = state.logo.sizePct;
     logoSizeVal.textContent = `${state.logo.sizePct}%`;
-    document.getElementById('logoMatchFade').checked = state.logo.matchFadeColor;
+    setSegmentedActive('logoColorMode', state.logo.colorMode);
+    logoCustomColorRow.style.display = state.logo.colorMode === 'custom' ? 'flex' : 'none';
+    document.getElementById('logoCustomColor').value = state.logo.customColor;
 
     marginSlider.value = Math.round(state.marginFrac * 100);
     marginVal.textContent = `${marginSlider.value}%`;
+
+    imageZoom.value = Math.round(state.imageTransform.zoom * 100);
+    imageZoomVal.textContent = `${imageZoom.value}%`;
 
     safeZoneToggle.checked = state.safeZone;
     presetSelect.value = state.preset;
