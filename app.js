@@ -3,11 +3,12 @@
 
   // ---------- constants ----------
 
+  // all four match Meta's supported ad image ratios (1:1, 4:5, 9:16, 1.91:1)
   const PRESETS = {
-    '1080x1350': { w: 1080, h: 1350, label: 'Feed (portrait)' },
-    '1080x1080': { w: 1080, h: 1080, label: 'Feed (square)' },
-    '1080x1920': { w: 1080, h: 1920, label: 'Story / Reels' },
-    '1200x628':  { w: 1200, h: 628,  label: 'Facebook link ad' },
+    '1080x1080': { w: 1080, h: 1080, label: 'Feed / Square — 1:1' },
+    '1080x1350': { w: 1080, h: 1350, label: 'Feed (portrait) — 4:5' },
+    '1080x1920': { w: 1080, h: 1920, label: 'Story / Reels — 9:16' },
+    '1200x628':  { w: 1200, h: 628,  label: 'Landscape / Link ad — 1.91:1' },
   };
 
   const FONTS = [
