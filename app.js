@@ -2125,13 +2125,9 @@
     };
   }
 
-  // the source crop is always computed as if zoom were at least 1: the
-  // zoom=1 cover crop already reveals as much of the image as the frame's
-  // aspect ratio allows without distorting it (one axis is already at the
-  // image's full extent), so there's nothing left to reveal by cropping
-  // further once you zoom out past 100% -- see drawImageCover for how that
-  // sub-100% case is actually drawn (the same crop, scaled down and
-  // centred, instead of grown).
+  // the source crop is always computed as if zoom were at least 1 -- below
+  // zoom=1, drawImageCover switches to showing the whole uncropped image
+  // instead (see there), so this crop/pan math only matters at zoom >= 1.
   function getImageCropRect(img, W, H) {
     const { baseSw, baseSh } = getBaseCropSize(img, W, H);
     const t = state.imageTransform;
@@ -2146,20 +2142,23 @@
   }
 
   function drawImageCover(img, W, H) {
-    const { sx, sy, sw, sh } = getImageCropRect(img, W, H);
     const zoom = state.imageTransform.zoom;
     if (zoom >= 1) {
+      const { sx, sy, sw, sh } = getImageCropRect(img, W, H);
       ctx.drawImage(img, sx, sy, sw, sh, 0, 0, W, H);
       return;
     }
-    // zoomed OUT past 100%: draw that same (zoom=1) crop into a smaller,
-    // centred destination rect instead of filling the whole canvas, so the
-    // canvas's white background (see paintComposite) shows around it as a
-    // margin rather than the photo being cropped further (which isn't
-    // possible -- see getImageCropRect).
-    const destW = W * zoom, destH = H * zoom;
+    // zoomed OUT past 100%: show the WHOLE photo, uncropped -- not just a
+    // smaller version of the zoom=1 *cropped* view, which would still be
+    // missing whatever the cover-fit crop cut off. Fit the entire image
+    // within the frame (containing it, so the whole subject is visible),
+    // then shrink that further as zoom drops, so the white canvas margin
+    // (see paintComposite) grows evenly on every side the further out you go.
+    const containScale = Math.min(W / img.naturalWidth, H / img.naturalHeight);
+    const scale = containScale * zoom;
+    const destW = img.naturalWidth * scale, destH = img.naturalHeight * scale;
     const destX = (W - destW) / 2, destY = (H - destH) / 2;
-    ctx.drawImage(img, sx, sy, sw, sh, destX, destY, destW, destH);
+    ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, destX, destY, destW, destH);
   }
 
   function updateLegibilityBanner(W, H, textBounds) {
