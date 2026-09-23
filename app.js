@@ -2128,24 +2128,15 @@
     ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, destX, destY, destW, destH);
   }
 
-  // clamps a pan offset to keep the image from being dragged completely out
-  // of view. On an axis where the image overflows the frame (destW >= W or
-  // destH >= H -- always true at zoom >= 1), this keeps it full-bleed: no
-  // gap ever opens up on either edge. Below that, the image is already
-  // smaller than the frame on that axis and free to move -- the same
-  // min/max span just runs the other way (from "flush against the start
-  // edge" to "flush against the end edge"), so it can be dragged to sit
-  // anywhere in the white margin, e.g. flush top instead of only centred.
+  // No clamping at all -- total freedom to position the image/focus point
+  // anywhere, at any zoom, including partially or fully off-canvas. Two
+  // earlier, narrower attempts (full-bleed-only, then "free but bounded to
+  // the frame") both still left some position unreachable; "Reset position"
+  // is the escape hatch if a drag goes further than intended.
   function clampImageOffset(offsetXPct, offsetYPct, zoom, img, W, H) {
-    const scale = coverScaleFor(img, W, H) * zoom;
-    const destW = img.naturalWidth * scale, destH = img.naturalHeight * scale;
-    const halfWFrac = destW > 0 ? W / (2 * destW) : 0.5;
-    const halfHFrac = destH > 0 ? H / (2 * destH) : 0.5;
-    const loX = Math.min(halfWFrac, 1 - halfWFrac), hiX = Math.max(halfWFrac, 1 - halfWFrac);
-    const loY = Math.min(halfHFrac, 1 - halfHFrac), hiY = Math.max(halfHFrac, 1 - halfHFrac);
     return {
-      offsetXPct: Math.min(Math.max(offsetXPct, loX), hiX),
-      offsetYPct: Math.min(Math.max(offsetYPct, loY), hiY),
+      offsetXPct,
+      offsetYPct,
     };
   }
 
