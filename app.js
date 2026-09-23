@@ -2141,6 +2141,20 @@
     return { sx, sy, sw, sh };
   }
 
+  // below zoom=1, the crop smoothly grows from the zoom=1 cover crop toward
+  // the whole image as zoom drops from 1 to REVEAL_ZOOM_MIN -- at every point
+  // in between, the on-screen size is `min(W/cropW, H/cropH)`, the scale
+  // that fits *that* crop's own (changing) aspect ratio inside the frame.
+  // At zoom=1 the crop's aspect ratio already matches the frame's, so that
+  // formula reduces to exactly the same fill-the-frame scale the zoom>=1
+  // branch uses -- no jump at the boundary, unlike the previous version,
+  // which swapped between two differently-scaled crops right at zoom=1.
+  // Below REVEAL_ZOOM_MIN the crop is already the whole image and can't grow
+  // any further, so from there down zoom just keeps shrinking that same
+  // (now-fixed) crop for extra margin, continuing smoothly from where the
+  // reveal phase left off.
+  const REVEAL_ZOOM_MIN = 0.8;
+
   function drawImageCover(img, W, H) {
     const zoom = state.imageTransform.zoom;
     if (zoom >= 1) {
@@ -2148,17 +2162,24 @@
       ctx.drawImage(img, sx, sy, sw, sh, 0, 0, W, H);
       return;
     }
-    // zoomed OUT past 100%: show the WHOLE photo, uncropped -- not just a
-    // smaller version of the zoom=1 *cropped* view, which would still be
-    // missing whatever the cover-fit crop cut off. Fit the entire image
-    // within the frame (containing it, so the whole subject is visible),
-    // then shrink that further as zoom drops, so the white canvas margin
-    // (see paintComposite) grows evenly on every side the further out you go.
-    const containScale = Math.min(W / img.naturalWidth, H / img.naturalHeight);
-    const scale = containScale * zoom;
-    const destW = img.naturalWidth * scale, destH = img.naturalHeight * scale;
+
+    const { baseSw, baseSh } = getBaseCropSize(img, W, H);
+    let cropW, cropH, scale;
+    if (zoom >= REVEAL_ZOOM_MIN) {
+      const revealFrac = (1 - zoom) / (1 - REVEAL_ZOOM_MIN);
+      cropW = baseSw + (img.naturalWidth - baseSw) * revealFrac;
+      cropH = baseSh + (img.naturalHeight - baseSh) * revealFrac;
+      scale = Math.min(W / cropW, H / cropH);
+    } else {
+      cropW = img.naturalWidth;
+      cropH = img.naturalHeight;
+      const containScale = Math.min(W / cropW, H / cropH);
+      scale = containScale * (zoom / REVEAL_ZOOM_MIN);
+    }
+    const sx = img.naturalWidth / 2 - cropW / 2, sy = img.naturalHeight / 2 - cropH / 2;
+    const destW = cropW * scale, destH = cropH * scale;
     const destX = (W - destW) / 2, destY = (H - destH) / 2;
-    ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, destX, destY, destW, destH);
+    ctx.drawImage(img, sx, sy, cropW, cropH, destX, destY, destW, destH);
   }
 
   function updateLegibilityBanner(W, H, textBounds) {
