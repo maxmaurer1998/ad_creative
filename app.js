@@ -2069,6 +2069,12 @@
     ctx.clearRect(0, 0, W, H);
 
     if (state.image) {
+      // white first so that zooming out past 100% (which letterboxes the
+      // photo instead of cropping it further -- see drawImageCover) reveals
+      // a plain white margin, matching the white background most product
+      // photos already have rather than showing canvas chrome through it
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, W, H);
       drawImageCover(state.image, W, H);
     } else {
       ctx.fillStyle = '#1a1a1e';
@@ -2103,22 +2109,34 @@
   }
 
   // clamps a pan offset (fraction of the source image) so the current zoom's
-  // crop rectangle never goes outside the source image bounds
+  // crop rectangle never goes outside the source image bounds. Below zoom=1
+  // the crop is pinned at its zoom=1 size (see getImageCropRect) -- there's
+  // no more image left to reveal by "growing" the crop further -- so this
+  // clamps the effective zoom to 1 as well, matching that fixed crop.
   function clampImageOffset(offsetXPct, offsetYPct, zoom, img, W, H) {
+    const effectiveZoom = Math.max(zoom, 1);
     const { baseSw, baseSh } = getBaseCropSize(img, W, H);
-    const halfWFrac = (baseSw / zoom / 2) / img.naturalWidth;
-    const halfHFrac = (baseSh / zoom / 2) / img.naturalHeight;
+    const halfWFrac = (baseSw / effectiveZoom / 2) / img.naturalWidth;
+    const halfHFrac = (baseSh / effectiveZoom / 2) / img.naturalHeight;
     return {
       offsetXPct: Math.min(Math.max(offsetXPct, halfWFrac), 1 - halfWFrac),
       offsetYPct: Math.min(Math.max(offsetYPct, halfHFrac), 1 - halfHFrac),
     };
   }
 
+  // the source crop is always computed as if zoom were at least 1: the
+  // zoom=1 cover crop already reveals as much of the image as the frame's
+  // aspect ratio allows without distorting it (one axis is already at the
+  // image's full extent), so there's nothing left to reveal by cropping
+  // further once you zoom out past 100% -- see drawImageCover for how that
+  // sub-100% case is actually drawn (the same crop, scaled down and
+  // centred, instead of grown).
   function getImageCropRect(img, W, H) {
     const { baseSw, baseSh } = getBaseCropSize(img, W, H);
     const t = state.imageTransform;
-    const sw = baseSw / t.zoom;
-    const sh = baseSh / t.zoom;
+    const zoom = Math.max(t.zoom, 1);
+    const sw = baseSw / zoom;
+    const sh = baseSh / zoom;
     const cx = t.offsetXPct * img.naturalWidth;
     const cy = t.offsetYPct * img.naturalHeight;
     const sx = Math.min(Math.max(cx - sw / 2, 0), img.naturalWidth - sw);
@@ -2128,7 +2146,19 @@
 
   function drawImageCover(img, W, H) {
     const { sx, sy, sw, sh } = getImageCropRect(img, W, H);
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, W, H);
+    const zoom = state.imageTransform.zoom;
+    if (zoom >= 1) {
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, W, H);
+      return;
+    }
+    // zoomed OUT past 100%: draw that same (zoom=1) crop into a smaller,
+    // centred destination rect instead of filling the whole canvas, so the
+    // canvas's white background (see paintComposite) shows around it as a
+    // margin rather than the photo being cropped further (which isn't
+    // possible -- see getImageCropRect).
+    const destW = W * zoom, destH = H * zoom;
+    const destX = (W - destW) / 2, destY = (H - destH) / 2;
+    ctx.drawImage(img, sx, sy, sw, sh, destX, destY, destW, destH);
   }
 
   function updateLegibilityBanner(W, H, textBounds) {
@@ -2231,7 +2261,7 @@
 
   function setImageZoom(zoom) {
     if (!state.image) return;
-    const clampedZoom = Math.min(4, Math.max(1, zoom));
+    const clampedZoom = Math.min(4, Math.max(0.5, zoom));
     state.imageTransform.zoom = clampedZoom;
     const clamped = clampImageOffset(
       state.imageTransform.offsetXPct, state.imageTransform.offsetYPct,
