@@ -28,7 +28,7 @@
     </div>
   </header>
 
-  <main class="stage-wrap">
+  <main class="stage-wrap" id="stageWrap">
     <div id="stage" class="stage">
       <canvas id="previewCanvas"></canvas>
       <div id="dropHint" class="drop-hint">
@@ -39,6 +39,11 @@
       </div>
       <div id="legibilityBanner" class="legibility-banner hidden"></div>
       <div id="eyedropperHint" class="eyedropper-hint hidden">Tap the image to pick that colour · Esc to cancel</div>
+    </div>
+    <div class="view-zoom-controls" id="viewZoomControls">
+      <button type="button" id="viewZoomOutBtn" class="view-zoom-btn" title="Zoom editing view out" disabled>−</button>
+      <span class="view-zoom-val" id="viewZoomVal">100%</span>
+      <button type="button" id="viewZoomInBtn" class="view-zoom-btn" title="Zoom editing view in">+</button>
     </div>
     <input type="file" id="imageInput" accept="image/*" hidden />
   </main>

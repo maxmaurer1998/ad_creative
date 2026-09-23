@@ -112,6 +112,7 @@
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   const stage = document.getElementById('stage');
+  const stageWrap = document.getElementById('stageWrap');
   const dropHint = document.getElementById('dropHint');
   const legibilityBanner = document.getElementById('legibilityBanner');
   const exportBtn = document.getElementById('exportBtn');
@@ -2176,16 +2177,57 @@
 
   // ---------- canvas resize to fit stage ----------
 
+  // "editing view" zoom (desktop only) -- purely how large the canvas is
+  // shown on screen, for finer editing on a small/cramped window. Never
+  // touches state.canvasW/H, state.imageTransform, or anything that affects
+  // the actual image or export -- it's the same composite, just displayed
+  // bigger, with the stage becoming scrollable once it no longer fits.
+  let viewZoom = 1;
+  const VIEW_ZOOM_MIN = 1, VIEW_ZOOM_MAX = 3, VIEW_ZOOM_STEP = 0.25;
+
+  // the available fitting box, independent of the stage's own current size
+  // (which view-zoom deliberately grows past 100% -- measuring from `stage`
+  // itself once it's already enlarged would feed back into itself)
+  function getStageAvailableBox() {
+    const cs = getComputedStyle(stageWrap);
+    const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+    const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    return { w: stageWrap.clientWidth - padX, h: stageWrap.clientHeight - padY };
+  }
+
   function fitStageToViewport() {
     // Canvas keeps its intrinsic (preset) resolution; CSS just scales it to fit the stage box.
-    const availW = stage.clientWidth;
-    const availH = stage.clientHeight;
-    const scale = Math.min(availW / state.canvasW, availH / state.canvasH);
+    const { w: availW, h: availH } = getStageAvailableBox();
+    const baseScale = Math.min(availW / state.canvasW, availH / state.canvasH);
+    const scale = baseScale * viewZoom;
     canvas.style.width = `${state.canvasW * scale}px`;
     canvas.style.height = `${state.canvasH * scale}px`;
   }
 
   window.addEventListener('resize', fitStageToViewport);
+
+  const viewZoomVal = document.getElementById('viewZoomVal');
+  const viewZoomInBtn = document.getElementById('viewZoomInBtn');
+  const viewZoomOutBtn = document.getElementById('viewZoomOutBtn');
+
+  function setViewZoom(zoom) {
+    viewZoom = Math.min(VIEW_ZOOM_MAX, Math.max(VIEW_ZOOM_MIN, zoom));
+    const zoomedIn = viewZoom > 1;
+    stageWrap.classList.toggle('view-zoomed', zoomedIn);
+    stage.classList.toggle('view-zoomed', zoomedIn);
+    viewZoomVal.textContent = `${Math.round(viewZoom * 100)}%`;
+    viewZoomOutBtn.disabled = viewZoom <= VIEW_ZOOM_MIN;
+    viewZoomInBtn.disabled = viewZoom >= VIEW_ZOOM_MAX;
+    fitStageToViewport();
+    // re-centre the scroll position on every zoom step, so + / - always
+    // zooms toward the middle of the frame rather than leaving the view
+    // pinned wherever it happened to be scrolled to
+    stageWrap.scrollLeft = (stageWrap.scrollWidth - stageWrap.clientWidth) / 2;
+    stageWrap.scrollTop = (stageWrap.scrollHeight - stageWrap.clientHeight) / 2;
+  }
+
+  viewZoomInBtn.addEventListener('click', () => setViewZoom(viewZoom + VIEW_ZOOM_STEP));
+  viewZoomOutBtn.addEventListener('click', () => setViewZoom(viewZoom - VIEW_ZOOM_STEP));
 
   // ---------- logo drag + photo pan/zoom (mode-exclusive on the canvas) ----------
 

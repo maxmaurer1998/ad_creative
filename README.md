@@ -36,7 +36,7 @@ For the "Add to Home Screen" / installable PWA behaviour and the Web Share API "
 - Full session auto-save in IndexedDB — the uploaded photo, the logo, and every setting persist in the browser and are restored on reopen; "Clear saved session" wipes the current working state back to a blank start (saved default logo, recipe templates, and the project library are kept)
 - A named recipe/template library: save the current fade/text/logo setup (not the photo) under a name, and re-apply it later to a different photo
 - A project library: nested folders (e.g. Advertising → Top of funnel) holding fully saved projects — photo, logo, and every setting — that can be reopened and tweaked later, browsable from a "Library" button in the header
-- Desktop/laptop friendly: above ~820px wide the layout switches to a canvas + sidebar side-by-side view (tabs and settings panel always visible together, no bottom sheet), with hover affordances on buttons/tabs — upload, typing, mouse-drag positioning/logo placement, and the library all work the same as on mobile, just with a mouse and keyboard
+- Desktop/laptop friendly: above ~820px wide the layout switches to a canvas + sidebar side-by-side view (tabs and settings panel always visible together, no bottom sheet), with hover affordances on buttons/tabs — upload, typing, mouse-drag positioning/logo placement, and the library all work the same as on mobile, just with a mouse and keyboard. A +/− "editing view" zoom (desktop only) in the corner of the canvas lets you display it larger than the window for finer editing — purely a bigger on-screen display of the same composite (the stage scrolls once it no longer fits), with zero effect on the actual image, its resolution, or the export
 
 ## Fonts
 
