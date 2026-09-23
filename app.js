@@ -2101,85 +2101,46 @@
     scheduleSaveRecipe();
   }
 
-  // the "cover fit" crop size at zoom=1 (no zoom), matching the canvas aspect ratio
-  function getBaseCropSize(img, W, H) {
-    const ir = img.naturalWidth / img.naturalHeight;
-    const cr = W / H;
-    if (ir > cr) return { baseSw: img.naturalHeight * cr, baseSh: img.naturalHeight };
-    return { baseSw: img.naturalWidth, baseSh: img.naturalWidth / cr };
+  // the scale that fills the frame exactly on one axis (and overflows the
+  // other, which the canvas clips naturally) at zoom=1 -- the single
+  // reference point the whole zoom range scales from.
+  function coverScaleFor(img, W, H) {
+    return Math.max(W / img.naturalWidth, H / img.naturalHeight);
   }
 
-  // clamps a pan offset (fraction of the source image) so the current zoom's
-  // crop rectangle never goes outside the source image bounds. Below zoom=1
-  // the crop is pinned at its zoom=1 size (see getImageCropRect) -- there's
-  // no more image left to reveal by "growing" the crop further -- so this
-  // clamps the effective zoom to 1 as well, matching that fixed crop.
-  function clampImageOffset(offsetXPct, offsetYPct, zoom, img, W, H) {
-    const effectiveZoom = Math.max(zoom, 1);
-    const { baseSw, baseSh } = getBaseCropSize(img, W, H);
-    const halfWFrac = (baseSw / effectiveZoom / 2) / img.naturalWidth;
-    const halfHFrac = (baseSh / effectiveZoom / 2) / img.naturalHeight;
-    return {
-      offsetXPct: Math.min(Math.max(offsetXPct, halfWFrac), 1 - halfWFrac),
-      offsetYPct: Math.min(Math.max(offsetYPct, halfHFrac), 1 - halfHFrac),
-    };
-  }
-
-  // the source crop is always computed as if zoom were at least 1 -- below
-  // zoom=1, drawImageCover switches to showing the whole uncropped image
-  // instead (see there), so this crop/pan math only matters at zoom >= 1.
-  function getImageCropRect(img, W, H) {
-    const { baseSw, baseSh } = getBaseCropSize(img, W, H);
-    const t = state.imageTransform;
-    const zoom = Math.max(t.zoom, 1);
-    const sw = baseSw / zoom;
-    const sh = baseSh / zoom;
-    const cx = t.offsetXPct * img.naturalWidth;
-    const cy = t.offsetYPct * img.naturalHeight;
-    const sx = Math.min(Math.max(cx - sw / 2, 0), img.naturalWidth - sw);
-    const sy = Math.min(Math.max(cy - sh / 2, 0), img.naturalHeight - sh);
-    return { sx, sy, sw, sh };
-  }
-
-  // below zoom=1, the crop smoothly grows from the zoom=1 cover crop toward
-  // the whole image as zoom drops from 1 to REVEAL_ZOOM_MIN -- at every point
-  // in between, the on-screen size is `min(W/cropW, H/cropH)`, the scale
-  // that fits *that* crop's own (changing) aspect ratio inside the frame.
-  // At zoom=1 the crop's aspect ratio already matches the frame's, so that
-  // formula reduces to exactly the same fill-the-frame scale the zoom>=1
-  // branch uses -- no jump at the boundary, unlike the previous version,
-  // which swapped between two differently-scaled crops right at zoom=1.
-  // Below REVEAL_ZOOM_MIN the crop is already the whole image and can't grow
-  // any further, so from there down zoom just keeps shrinking that same
-  // (now-fixed) crop for extra margin, continuing smoothly from where the
-  // reveal phase left off.
-  const REVEAL_ZOOM_MIN = 0.8;
-
+  // The whole pan/zoom model is one formula: draw the *entire* source image
+  // at scale = coverScaleFor(...) * zoom, positioned so that the source
+  // point (offsetXPct, offsetYPct) sits at the frame's centre. There's no
+  // separate "crop" concept and no branch on zoom at all, so there is
+  // nothing that *can* jump: at zoom=1 this exactly fills the frame on the
+  // constrained axis (matching the old cover-crop default) and overflows
+  // the other axis, which the canvas clips for free; below zoom=1 the image
+  // is simply smaller than the frame on both axes, so the plain white
+  // background (see paintComposite) shows around it as a margin that grows
+  // continuously the further out you go -- one continuous linear scale, not
+  // two different fits stitched together at a boundary.
   function drawImageCover(img, W, H) {
-    const zoom = state.imageTransform.zoom;
-    if (zoom >= 1) {
-      const { sx, sy, sw, sh } = getImageCropRect(img, W, H);
-      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, W, H);
-      return;
-    }
+    const t = state.imageTransform;
+    const scale = coverScaleFor(img, W, H) * t.zoom;
+    const destW = img.naturalWidth * scale, destH = img.naturalHeight * scale;
+    const destX = W / 2 - t.offsetXPct * destW;
+    const destY = H / 2 - t.offsetYPct * destH;
+    ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, destX, destY, destW, destH);
+  }
 
-    const { baseSw, baseSh } = getBaseCropSize(img, W, H);
-    let cropW, cropH, scale;
-    if (zoom >= REVEAL_ZOOM_MIN) {
-      const revealFrac = (1 - zoom) / (1 - REVEAL_ZOOM_MIN);
-      cropW = baseSw + (img.naturalWidth - baseSw) * revealFrac;
-      cropH = baseSh + (img.naturalHeight - baseSh) * revealFrac;
-      scale = Math.min(W / cropW, H / cropH);
-    } else {
-      cropW = img.naturalWidth;
-      cropH = img.naturalHeight;
-      const containScale = Math.min(W / cropW, H / cropH);
-      scale = containScale * (zoom / REVEAL_ZOOM_MIN);
-    }
-    const sx = img.naturalWidth / 2 - cropW / 2, sy = img.naturalHeight / 2 - cropH / 2;
-    const destW = cropW * scale, destH = cropH * scale;
-    const destX = (W - destW) / 2, destY = (H - destH) / 2;
-    ctx.drawImage(img, sx, sy, cropW, cropH, destX, destY, destW, destH);
+  // clamps a pan offset so the drawn image (at the given zoom) never leaves
+  // a gap on an edge it's supposed to be covering. Once the image no longer
+  // overflows an axis (destW <= W or destH <= H -- always true below
+  // zoom=1), there's nothing to pan on that axis, so it's pinned centred.
+  function clampImageOffset(offsetXPct, offsetYPct, zoom, img, W, H) {
+    const scale = coverScaleFor(img, W, H) * zoom;
+    const destW = img.naturalWidth * scale, destH = img.naturalHeight * scale;
+    const halfWFrac = destW > 0 ? W / (2 * destW) : 0.5;
+    const halfHFrac = destH > 0 ? H / (2 * destH) : 0.5;
+    return {
+      offsetXPct: halfWFrac <= 0.5 ? Math.min(Math.max(offsetXPct, halfWFrac), 1 - halfWFrac) : 0.5,
+      offsetYPct: halfHFrac <= 0.5 ? Math.min(Math.max(offsetYPct, halfHFrac), 1 - halfHFrac) : 0.5,
+    };
   }
 
   function updateLegibilityBanner(W, H, textBounds) {
@@ -2388,9 +2349,9 @@
         const scaleY = state.canvasH / rect.height;
         const dxCanvas = (e.clientX - panStart.clientX) * scaleX;
         const dyCanvas = (e.clientY - panStart.clientY) * scaleY;
-        const { sw, sh } = getImageCropRect(state.image, state.canvasW, state.canvasH);
-        const dxFrac = -(dxCanvas * sw / state.canvasW) / state.image.naturalWidth;
-        const dyFrac = -(dyCanvas * sh / state.canvasH) / state.image.naturalHeight;
+        const scale = coverScaleFor(state.image, state.canvasW, state.canvasH) * state.imageTransform.zoom;
+        const dxFrac = -dxCanvas / (state.image.naturalWidth * scale);
+        const dyFrac = -dyCanvas / (state.image.naturalHeight * scale);
         const clamped = clampImageOffset(
           panStart.offsetXPct + dxFrac, panStart.offsetYPct + dyFrac,
           state.imageTransform.zoom, state.image, state.canvasW, state.canvasH
@@ -2464,8 +2425,8 @@
   const MAX_EXPORT_DIMENSION = 4096;
   function computeExportScale() {
     if (!state.image) return 1;
-    const { sw, sh } = getImageCropRect(state.image, state.canvasW, state.canvasH);
-    const neededScale = Math.max(sw / state.canvasW, sh / state.canvasH, 1);
+    const scale = coverScaleFor(state.image, state.canvasW, state.canvasH) * state.imageTransform.zoom;
+    const neededScale = Math.max(1 / scale, 1);
     const maxAllowedScale = MAX_EXPORT_DIMENSION / Math.max(state.canvasW, state.canvasH);
     return Math.min(neededScale, maxAllowedScale);
   }
@@ -2560,11 +2521,8 @@
   const MAX_VIDEO_DIMENSION = 1920;
   function computeScaleForTransform(transform, maxDimension) {
     if (!state.image) return 1;
-    const original = state.imageTransform;
-    state.imageTransform = transform;
-    const { sw, sh } = getImageCropRect(state.image, state.canvasW, state.canvasH);
-    state.imageTransform = original;
-    const neededScale = Math.max(sw / state.canvasW, sh / state.canvasH, 1);
+    const scale = coverScaleFor(state.image, state.canvasW, state.canvasH) * transform.zoom;
+    const neededScale = Math.max(1 / scale, 1);
     const maxAllowedScale = maxDimension / Math.max(state.canvasW, state.canvasH);
     return Math.min(neededScale, maxAllowedScale);
   }
