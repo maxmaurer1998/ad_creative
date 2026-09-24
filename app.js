@@ -75,6 +75,7 @@
     text: {
       hAlign: 'center',
       vAlign: 100, // 0=top .. 100=bottom, continuous
+      orientation: 'horizontal', // 'horizontal' | 'vertical' | 'vertical-flipped'
       layers: {
         headline:  { text: 'New Season, New Look', font: 'playfair', size: 72, color: '#ffffff' },
         subheader: { text: 'Shop the collection today', font: 'worksans', size: 36, color: '#ffffff', enabled: true },
@@ -253,6 +254,7 @@
       text: {
         hAlign: state.text.hAlign,
         vAlign: state.text.vAlign,
+        orientation: state.text.orientation,
         layers: {
           headline: { ...state.text.layers.headline },
           subheader: { ...state.text.layers.subheader },
@@ -285,6 +287,7 @@
     if (recipe.effects) Object.assign(state.effects, recipe.effects);
     if (recipe.text) {
       if (recipe.text.hAlign) state.text.hAlign = recipe.text.hAlign;
+      if (recipe.text.orientation) state.text.orientation = recipe.text.orientation;
       if (typeof recipe.text.vAlign === 'number') state.text.vAlign = recipe.text.vAlign;
       else {
         const legacy = legacyVAlignToNumber(recipe.text.vAlign);
@@ -766,6 +769,31 @@
 
   wireSegmented('fadeDirection', (val) => { state.fade.direction = val; render(); });
   wireSegmented('textHAlign', (val) => { state.text.hAlign = val; render(); });
+
+  const textVPosLabel = document.getElementById('textVPosLabel');
+  const textVPosScaleLabels = document.querySelectorAll('#textVPosScaleLabels span');
+  const textVPosHint = document.getElementById('textVPosHint');
+  function updateTextVPosLabels() {
+    const orientation = state.text.orientation || 'horizontal';
+    if (orientation === 'horizontal') {
+      textVPosLabel.textContent = 'Vertical position';
+      textVPosScaleLabels[0].textContent = 'Top';
+      textVPosScaleLabels[1].textContent = 'Bottom';
+      textVPosHint.textContent = 'Slides the whole text block up or down, without ever crossing the top/bottom edge padding. If you\'re on the Story/Reels preset, turn on "Show safe zone" (Canvas tab) to check the text won\'t sit under Instagram\'s own UI.';
+    } else {
+      textVPosLabel.textContent = 'Horizontal position';
+      const nearEdge = orientation === 'vertical' ? 'Right' : 'Left';
+      const farEdge = orientation === 'vertical' ? 'Left' : 'Right';
+      textVPosScaleLabels[0].textContent = nearEdge;
+      textVPosScaleLabels[1].textContent = farEdge;
+      textVPosHint.textContent = `Slides the whole (rotated) text block left or right, without ever crossing the left/right edge padding.`;
+    }
+  }
+  wireSegmented('textOrientation', (val) => {
+    state.text.orientation = val;
+    updateTextVPosLabels();
+    render();
+  });
   wireSegmented('logoPreset', (val) => {
     applyLogoCorner(val);
     state.logo.manuallyPositioned = false;
@@ -1197,21 +1225,23 @@
   const getFrontierNoiseLayer = makeNoiseLayerCache();
 
   function drawFade(W, H, fade) {
-    const scrimH = H * (fade.reach / 100);
-    if (scrimH <= 0) return;
+    const vertical = fade.direction === 'top' || fade.direction === 'bottom';
+    const extent = vertical ? H : W;
+    const scrim = extent * (fade.reach / 100);
+    if (scrim <= 0) return;
     const plateauK = speedValueToPlateauK(fade.speed);
     const intensity = (typeof fade.intensity === 'number' ? fade.intensity : 100) / 100;
     const { r, g, b } = hexToRgb(fade.color);
 
-    let yOuter, yInner; // outer = transparent edge, inner = solid edge
-    if (fade.direction === 'bottom') {
-      yOuter = H - scrimH;
-      yInner = H;
+    let outer, inner; // outer = transparent edge, inner = solid edge, along the fade's own axis
+    if (fade.direction === 'bottom' || fade.direction === 'right') {
+      outer = extent - scrim;
+      inner = extent;
     } else {
-      yOuter = scrimH;
-      yInner = 0;
+      outer = scrim;
+      inner = 0;
     }
-    const rectY = Math.min(yOuter, yInner);
+    const rectStart = Math.min(outer, inner);
 
     // build the gradient on its own transparent layer first (rather than
     // straight onto the already-opaque photo) so an optional texture pass
@@ -1219,11 +1249,13 @@
     // compositing over an opaque photo would flatten every pixel's alpha
     // to 1, breaking that falloff.
     const layer = document.createElement('canvas');
-    layer.width = W;
-    layer.height = scrimH;
+    layer.width = vertical ? W : scrim;
+    layer.height = vertical ? scrim : H;
     const lctx = layer.getContext('2d');
 
-    const grad = lctx.createLinearGradient(0, yOuter - rectY, 0, yInner - rectY);
+    const grad = vertical
+      ? lctx.createLinearGradient(0, outer - rectStart, 0, inner - rectStart)
+      : lctx.createLinearGradient(outer - rectStart, 0, inner - rectStart, 0);
     const steps = 48;
     for (let s = 0; s <= steps; s++) {
       const frac = s / steps;
@@ -1231,17 +1263,18 @@
       grad.addColorStop(frac, `rgba(${r},${g},${b},${alpha})`);
     }
     lctx.fillStyle = grad;
-    lctx.fillRect(0, 0, W, scrimH);
+    lctx.fillRect(0, 0, layer.width, layer.height);
 
     if (fade.textured) {
       const grainPx = grainSizeValueToPx(typeof fade.textureGrainSize === 'number' ? fade.textureGrainSize : 25);
       lctx.globalCompositeOperation = 'source-atop';
       lctx.globalAlpha = (typeof fade.textureIntensity === 'number' ? fade.textureIntensity : 100) / 100;
-      lctx.drawImage(getFadeNoiseLayer(W, scrimH, grainPx), 0, 0);
+      lctx.drawImage(getFadeNoiseLayer(layer.width, layer.height, grainPx), 0, 0);
       lctx.globalAlpha = 1;
     }
 
-    ctx.drawImage(layer, 0, rectY);
+    if (vertical) ctx.drawImage(layer, 0, rectStart);
+    else ctx.drawImage(layer, rectStart, 0);
   }
 
   // ---------- Fuji-inspired film-stock colour grade ----------
@@ -1812,31 +1845,44 @@
     }
   }
 
-  // average fade alpha across a vertical span [y0,y1] (for legibility check)
-  function avgFadeAlphaOverSpan(W, H, fade, y0, y1) {
-    const scrimH = H * (fade.reach / 100);
-    if (scrimH <= 0) return 0;
+  // the fade's alpha at a single canvas point, for any direction -- the
+  // legibility check samples a grid of these rather than assuming the fade
+  // runs vertically, since it can now run along either axis.
+  function sampleFadeAlpha(fade, W, H, x, y) {
+    const vertical = fade.direction === 'top' || fade.direction === 'bottom';
+    const extent = vertical ? H : W;
+    const scrim = extent * (fade.reach / 100);
+    if (scrim <= 0) return 0;
     const plateauK = speedValueToPlateauK(fade.speed);
     const intensity = (typeof fade.intensity === 'number' ? fade.intensity : 100) / 100;
-    let zoneStart, zoneEnd; // zone in canvas y-coords, zoneStart = outer(0 alpha), zoneEnd = inner(full alpha)
-    if (fade.direction === 'bottom') { zoneStart = H - scrimH; zoneEnd = H; }
-    else { zoneStart = scrimH; zoneEnd = 0; }
-
-    const samples = 12;
-    let total = 0;
-    for (let i = 0; i < samples; i++) {
-      const y = y0 + ((y1 - y0) * i) / (samples - 1 || 1);
-      let alpha;
-      if (fade.direction === 'bottom') {
-        if (y <= zoneStart) alpha = 0;
-        else alpha = fadeAlphaAt((y - zoneStart) / scrimH, plateauK) * intensity;
-      } else {
-        if (y >= zoneStart) alpha = 0;
-        else alpha = fadeAlphaAt((zoneStart - y) / scrimH, plateauK) * intensity;
-      }
-      total += alpha;
+    const pos = vertical ? y : x;
+    const towardEnd = fade.direction === 'bottom' || fade.direction === 'right';
+    const outer = towardEnd ? extent - scrim : scrim;
+    let frac;
+    if (towardEnd) {
+      if (pos <= outer) return 0;
+      frac = (pos - outer) / scrim;
+    } else {
+      if (pos >= outer) return 0;
+      frac = (outer - pos) / scrim;
     }
-    return total / samples;
+    return fadeAlphaAt(Math.min(1, frac), plateauK) * intensity;
+  }
+
+  // average fade alpha over a rectangle {left,right,top,bottom} in canvas
+  // space (for the legibility check) -- a grid rather than a single axis so
+  // it works regardless of which way the fade or the text block runs.
+  function avgFadeAlphaOverRect(W, H, fade, rect) {
+    const cols = 6, rows = 6;
+    let total = 0;
+    for (let i = 0; i < cols; i++) {
+      const x = rect.left + (rect.right - rect.left) * (cols === 1 ? 0.5 : i / (cols - 1));
+      for (let j = 0; j < rows; j++) {
+        const y = rect.top + (rect.bottom - rect.top) * (rows === 1 ? 0.5 : j / (rows - 1));
+        total += sampleFadeAlpha(fade, W, H, x, y);
+      }
+    }
+    return total / (cols * rows);
   }
 
   // ---------- text drawing ----------
@@ -1898,24 +1944,43 @@
     return { built, totalHeight, margin, maxWidth, layerGap };
   }
 
+  // "vertical" rotates the whole block 90° so it reads top-to-bottom;
+  // "vertical-flipped" rotates it -90° the other way, for bottom-to-top.
+  // Rather than reimplementing wrapping/layout for a vertical writing mode,
+  // this builds the exact same block as normal in a "logical" space with
+  // width and height swapped (so wrapping is constrained by the canvas's
+  // *height*, which becomes the block's on-screen width once rotated), then
+  // draws it through a single rotation transform around the canvas centre.
   function drawTextBlock(W, H) {
-    const { built, totalHeight, margin } = buildTextBlock(W, H);
+    const orientation = state.text.orientation || 'horizontal';
+    const vertical = orientation !== 'horizontal';
+    const effW = vertical ? H : W, effH = vertical ? W : H;
+
+    const { built, totalHeight, margin } = buildTextBlock(effW, effH);
     if (built.length === 0) return null;
 
-    // vAlign is 0 (top) .. 100 (bottom); vPad keeps the block from ever
-    // touching the very top/bottom edge, however far it's slid
-    const vPad = H * state.marginVFrac;
+    // vAlign is 0 (top) .. 100 (bottom) along the block's own stacking
+    // direction; vPad keeps it from ever touching that direction's edge
+    const vPad = effH * state.marginVFrac;
     const topmostY = vPad;
-    const bottommostY = H - vPad - totalHeight;
+    const bottommostY = effH - vPad - totalHeight;
     const startY = topmostY + (bottommostY - topmostY) * (state.text.vAlign / 100);
 
     let x;
     if (state.text.hAlign === 'left') { ctx.textAlign = 'left'; x = margin; }
-    else if (state.text.hAlign === 'right') { ctx.textAlign = 'right'; x = W - margin; }
-    else { ctx.textAlign = 'center'; x = W / 2; }
+    else if (state.text.hAlign === 'right') { ctx.textAlign = 'right'; x = effW - margin; }
+    else { ctx.textAlign = 'center'; x = effW / 2; }
+
+    ctx.save();
+    if (vertical) {
+      const angle = orientation === 'vertical-flipped' ? -Math.PI / 2 : Math.PI / 2;
+      ctx.translate(W / 2, H / 2);
+      ctx.rotate(angle);
+      ctx.translate(-effW / 2, -effH / 2);
+    }
 
     let y = startY;
-    const layerGap = H * 0.015;
+    const layerGap = effH * 0.015;
 
     built.forEach((l, idx) => {
       ctx.font = fontCss(l, l.sizePx);
@@ -1927,8 +1992,17 @@
       });
       if (idx < built.length - 1) y += layerGap;
     });
+    ctx.restore();
 
-    return { top: startY, bottom: startY + totalHeight };
+    if (!vertical) return { top: startY, bottom: startY + totalHeight, left: 0, right: W };
+    // rotated ±90° about the canvas centre: the block's local stacking span
+    // [startY, startY+totalHeight] maps onto a vertical *band* of x in real
+    // canvas space (full height, since the block's other axis -- 0..effW --
+    // sweeps the whole of H once rotated). See the two rotation matrices:
+    // +90° reverses the span (band runs from the far/right edge inward),
+    // -90° keeps it in the same order (band runs from the near/left edge).
+    const bandNear = orientation === 'vertical-flipped' ? startY : W - startY - totalHeight;
+    return { top: 0, bottom: H, left: bandNear, right: bandNear + totalHeight };
   }
 
   // ---------- logo drawing ----------
@@ -2141,12 +2215,18 @@
     };
   }
 
+  const FADE_DIRECTION_SUGGESTION = {
+    bottom: 'try sliding the text down, toward the bottom, or increase the fade\'s reach/intensity',
+    top: 'try sliding the text up, toward the top, or increase the fade\'s reach/intensity',
+    right: 'try moving the text further right, or increase the fade\'s reach/intensity',
+    left: 'try moving the text further left, or increase the fade\'s reach/intensity',
+  };
+
   function updateLegibilityBanner(W, H, textBounds) {
     if (!textBounds) { legibilityBanner.classList.add('hidden'); return; }
-    const avgAlpha = avgFadeAlphaOverSpan(W, H, state.fade, textBounds.top, textBounds.bottom);
+    const avgAlpha = avgFadeAlphaOverRect(W, H, state.fade, textBounds);
     if (avgAlpha < 0.4) {
-      const towardFadeEdge = state.fade.direction === 'bottom' ? 'down, toward the bottom' : 'up, toward the top';
-      const suggestion = `try sliding the text ${towardFadeEdge}, or increase the fade's reach/intensity`;
+      const suggestion = FADE_DIRECTION_SUGGESTION[state.fade.direction] || 'increase the fade\'s reach/intensity';
       legibilityBanner.textContent = `Text may be hard to read here — ${suggestion}.`;
       legibilityBanner.classList.remove('hidden');
     } else {
@@ -2665,6 +2745,8 @@
 
     setSegmentedActive('fadeDirection', state.fade.direction);
     setSegmentedActive('textHAlign', state.text.hAlign);
+    setSegmentedActive('textOrientation', state.text.orientation || 'horizontal');
+    updateTextVPosLabels();
     textVPos.value = state.text.vAlign;
 
     fadeReach.value = state.fade.reach;

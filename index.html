@@ -145,9 +145,11 @@
     <div class="panel" id="panel-fade">
       <div class="control-row">
         <label>Direction</label>
-        <div class="segmented" id="fadeDirection">
+        <div class="segmented segmented-2x2" id="fadeDirection">
           <button data-val="bottom" class="active">Bottom</button>
           <button data-val="top">Top</button>
+          <button data-val="left">Left</button>
+          <button data-val="right">Right</button>
         </div>
       </div>
       <div class="control-row">
@@ -206,14 +208,23 @@
         </div>
       </div>
       <div class="control-row">
-        <label for="textVPos">Vertical position</label>
+        <label>Orientation</label>
+        <div class="segmented segmented-2x2" id="textOrientation">
+          <button data-val="horizontal" class="active">Horizontal</button>
+          <button data-val="vertical">Vertical</button>
+          <button data-val="vertical-flipped">Vertical (flipped)</button>
+        </div>
+      </div>
+      <div class="control-row">
+        <label for="textVPos" id="textVPosLabel">Vertical position</label>
         <input type="range" id="textVPos" min="0" max="100" value="100" />
       </div>
-      <div class="range-scale-labels">
+      <div class="range-scale-labels" id="textVPosScaleLabels">
         <span>Top</span>
         <span>Bottom</span>
       </div>
-      <p class="hint-text">Slides the whole text block up or down, without ever crossing the top/bottom edge padding. If you're on the Story/Reels preset, turn on "Show safe zone" (Canvas tab) to check the text won't sit under Instagram's own UI.</p>
+      <p class="hint-text" id="textVPosHint">Slides the whole text block up or down, without ever crossing the top/bottom edge padding. If you're on the Story/Reels preset, turn on "Show safe zone" (Canvas tab) to check the text won't sit under Instagram's own UI.</p>
+      <p class="hint-text">"Vertical" rotates the whole text block (all lines, stacked in the same order) 90° so it reads top-to-bottom; "Vertical (flipped)" rotates it the other way, for reading bottom-to-top. Font, size, colour and alignment all still work the same per line — only the block's orientation changes.</p>
 
       <div class="layer-tabs" id="layerTabs">
         <button class="layer-tab active" data-layer="headline">Headline</button>
