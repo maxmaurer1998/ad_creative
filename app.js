@@ -771,7 +771,15 @@
   }
 
   wireSegmented('fadeDirection', (val) => { state.fade.direction = val; render(); });
-  wireSegmented('textHAlign', (val) => { state.text.hAlign = val; render(); });
+  wireSegmented('textHAlign', (val) => {
+    state.text.hAlign = val;
+    // quick-jump the continuous cross-position slider to match, so the
+    // button still acts as a "snap to that side" shortcut like it used to,
+    // while direct dragging (or the slider) can still move it anywhere after
+    state.text.crossAlign = val === 'left' ? 0 : val === 'right' ? 100 : 50;
+    textCrossAlign.value = state.text.crossAlign;
+    render();
+  });
 
   const textVPosLabel = document.getElementById('textVPosLabel');
   const textVPosScaleLabels = document.querySelectorAll('#textVPosScaleLabels span');
@@ -793,22 +801,26 @@
     }
   }
   const textHAlignRow = document.getElementById('textHAlignRow');
-  const textCrossAlignRow = document.getElementById('textCrossAlignRow');
-  const textCrossAlignRow2 = document.getElementById('textCrossAlignRow2');
-  const textCrossAlignHint = document.getElementById('textCrossAlignHint');
+  const textCrossAlignLabel = document.getElementById('textCrossAlignLabel');
+  const textCrossAlignScaleLabels = document.querySelectorAll('#textCrossAlignRow2 span');
   const textCrossAlign = document.getElementById('textCrossAlign');
   function updateTextOrientationRows() {
     const vertical = (state.text.orientation || 'horizontal') !== 'horizontal';
-    textHAlignRow.style.display = vertical ? 'none' : 'flex';
-    textCrossAlignRow.style.display = vertical ? 'flex' : 'none';
-    textCrossAlignRow2.style.display = vertical ? 'flex' : 'none';
-    textCrossAlignHint.style.display = vertical ? 'block' : 'none';
+    textHAlignRow.style.display = vertical ? 'none' : 'flex'; // text-align style only makes sense (and only applies) in horizontal mode
+    if (vertical) {
+      textCrossAlignLabel.textContent = 'Vertical position';
+      textCrossAlignScaleLabels[0].textContent = 'Top';
+      textCrossAlignScaleLabels[1].textContent = 'Bottom';
+    } else {
+      textCrossAlignLabel.textContent = 'Horizontal position';
+      textCrossAlignScaleLabels[0].textContent = 'Left';
+      textCrossAlignScaleLabels[1].textContent = 'Right';
+    }
   }
   wireSegmented('textOrientation', (val) => {
-    // clicking the already-active *vertical* option again is a shortcut to
-    // snap both position sliders back to dead-centre, per the request to
-    // "get back to the middle" without having to drag each slider by hand
-    if (val === state.text.orientation && val !== 'horizontal') {
+    // clicking the already-active option again is a shortcut to snap both
+    // position sliders back to dead-centre, without dragging each by hand
+    if (val === state.text.orientation) {
       state.text.vAlign = 50;
       state.text.crossAlign = 50;
       textVPos.value = 50;
@@ -1976,14 +1988,26 @@
     return { built, totalHeight, margin, maxWidth, layerGap, maxLineWidth };
   }
 
+  // computes everything about the text block's current position -- shared by
+  // drawTextBlock (rendering), the pointerdown hit-test, and the pointermove
+  // drag handler, so all three always agree on where the block actually is.
+  //
   // "vertical" rotates the whole block 90° so it reads top-to-bottom;
   // "vertical-flipped" rotates it -90° the other way, for bottom-to-top.
   // Rather than reimplementing wrapping/layout for a vertical writing mode,
   // this builds the exact same block as normal in a "logical" space with
   // width and height swapped (so wrapping is constrained by the canvas's
   // *height*, which becomes the block's on-screen width once rotated), then
-  // draws it through a single rotation transform around the canvas centre.
-  function drawTextBlock(W, H) {
+  // (in drawTextBlock) draws it through a rotation transform about the
+  // canvas centre.
+  //
+  // vAlign (0-100) is the block's position along its own stacking direction
+  // -- screen-vertical when horizontal, screen-horizontal once rotated.
+  // crossAlign (0-100) is its position along the other, cross axis -- the
+  // one hAlign's left/center/right buttons used to only offer 3 fixed stops
+  // for; now continuous (and draggable) for both orientations, with hAlign
+  // left purely as which way each line's text visually aligns.
+  function computeTextLayout(W, H) {
     const orientation = state.text.orientation || 'horizontal';
     const vertical = orientation !== 'horizontal';
     const effW = vertical ? H : W, effH = vertical ? W : H;
@@ -1991,30 +2015,56 @@
     const { built, totalHeight, margin, maxLineWidth } = buildTextBlock(effW, effH);
     if (built.length === 0) return null;
 
-    // vAlign is 0 (top) .. 100 (bottom) along the block's own stacking
-    // direction; vPad keeps it from ever touching that direction's edge
     const vPad = effH * state.marginVFrac;
     const topmostY = vPad;
     const bottommostY = effH - vPad - totalHeight;
     const startY = topmostY + (bottommostY - topmostY) * (state.text.vAlign / 100);
 
-    let x;
-    if (vertical) {
-      // the block's position on the cross (non-stacking) axis -- after
-      // rotation this is the screen's vertical axis, so it gets its own
-      // continuous slider (crossAlign) instead of the 3-way hAlign used in
-      // horizontal mode. 0=screen-top .. 100=screen-bottom; which way that
-      // maps onto local x depends on the rotation direction (derived from
-      // the same rotation matrices as the returned legibility bounds below).
-      const leftmostX = margin, rightmostX = effW - margin;
-      const crossFrac = (typeof state.text.crossAlign === 'number' ? state.text.crossAlign : 50) / 100;
-      x = orientation === 'vertical-flipped'
-        ? rightmostX + (leftmostX - rightmostX) * crossFrac
-        : leftmostX + (rightmostX - leftmostX) * crossFrac;
-      ctx.textAlign = 'center';
-    } else if (state.text.hAlign === 'left') { ctx.textAlign = 'left'; x = margin; }
-    else if (state.text.hAlign === 'right') { ctx.textAlign = 'right'; x = effW - margin; }
-    else { ctx.textAlign = 'center'; x = effW / 2; }
+    const leftmostX = margin, rightmostX = effW - margin;
+    const crossFrac = (typeof state.text.crossAlign === 'number' ? state.text.crossAlign : 50) / 100;
+    // 0=screen-top/left .. 100=screen-bottom/right; which way that maps onto
+    // local x depends on the rotation direction for vertical orientations
+    const x = orientation === 'vertical-flipped'
+      ? rightmostX + (leftmostX - rightmostX) * crossFrac
+      : leftmostX + (rightmostX - leftmostX) * crossFrac;
+
+    return { orientation, vertical, effW, effH, built, totalHeight, margin, maxLineWidth, topmostY, bottommostY, startY, leftmostX, rightmostX, x };
+  }
+
+  // the block's real-canvas-space bounding rect {left,right,top,bottom} --
+  // used for alignment guides, the drag hit-test, and the legibility check.
+  // Uses the widest actual rendered line (maxLineWidth), not the full wrap
+  // width, so it's a tight fit rather than a conservative full-axis band.
+  function computeTextBoundsFromLayout(W, H, layout) {
+    const { orientation, vertical, totalHeight, maxLineWidth, startY, x } = layout;
+    if (!vertical) {
+      let left, right;
+      if (state.text.hAlign === 'left') { left = x; right = x + maxLineWidth; }
+      else if (state.text.hAlign === 'right') { left = x - maxLineWidth; right = x; }
+      else { left = x - maxLineWidth / 2; right = x + maxLineWidth / 2; }
+      return { top: startY, bottom: startY + totalHeight, left, right };
+    }
+    // rotated ±90° about the canvas centre: the block's local stacking span
+    // [startY, startY+totalHeight] maps onto a vertical band of x in real
+    // canvas space, and the (centred) cross-axis span around `x` maps onto
+    // a band of y -- see the rotation matrices in the comment above `x` in
+    // computeTextLayout.
+    const bandNear = orientation === 'vertical-flipped' ? startY : W - startY - totalHeight;
+    const halfLine = maxLineWidth / 2;
+    return {
+      top: orientation === 'vertical-flipped' ? H - x - halfLine : x - halfLine,
+      bottom: orientation === 'vertical-flipped' ? H - x + halfLine : x + halfLine,
+      left: bandNear,
+      right: bandNear + totalHeight,
+    };
+  }
+
+  function drawTextBlock(W, H) {
+    const layout = computeTextLayout(W, H);
+    if (!layout) return null;
+    const { orientation, vertical, effW, effH, built, startY, x } = layout;
+
+    ctx.textAlign = vertical ? 'center' : (state.text.hAlign || 'center');
 
     ctx.save();
     if (vertical) {
@@ -2039,24 +2089,7 @@
     });
     ctx.restore();
 
-    // tight bounds (using the widest actual line, not the full wrap width)
-    // for alignment guides and the legibility check alike
-    if (!vertical) {
-      let left, right;
-      if (state.text.hAlign === 'left') { left = margin; right = margin + maxLineWidth; }
-      else if (state.text.hAlign === 'right') { left = W - margin - maxLineWidth; right = W - margin; }
-      else { left = W / 2 - maxLineWidth / 2; right = W / 2 + maxLineWidth / 2; }
-      return { top: startY, bottom: startY + totalHeight, left, right };
-    }
-    // rotated ±90° about the canvas centre: the block's local stacking span
-    // [startY, startY+totalHeight] maps onto a vertical band of x in real
-    // canvas space, and the (centred) cross-axis span around `x` maps onto
-    // a band of y -- see the rotation matrices in the comments above `x`.
-    const bandNear = orientation === 'vertical-flipped' ? startY : W - startY - totalHeight;
-    const halfLine = maxLineWidth / 2;
-    const top = orientation === 'vertical-flipped' ? H - x - halfLine : x - halfLine;
-    const bottom = orientation === 'vertical-flipped' ? H - x + halfLine : x + halfLine;
-    return { top, bottom, left: bandNear, right: bandNear + totalHeight };
+    return computeTextBoundsFromLayout(W, H, layout);
   }
 
   // ---------- logo drawing ----------
@@ -2153,12 +2186,12 @@
     ctx.drawImage(source, r.x, r.y, r.w, r.h);
   }
 
-  // ---------- logo margin guide lines (shown while dragging) ----------
+  // ---------- drag margin guide lines (shown while dragging the logo or text) ----------
 
-  let showLogoGuides = false;
+  let dragGuideTarget = null; // null | 'logo' | 'text' -- which object is being dragged, if any
 
-  function drawLogoGuides(W, H) {
-    if (!showLogoGuides) return;
+  function drawDragGuides(W, H) {
+    if (!dragGuideTarget) return;
     const marginPx = W * state.marginFrac;
     const marginVPx = H * state.marginVFrac;
     ctx.save();
@@ -2180,15 +2213,21 @@
     ctx.restore();
   }
 
-  // ---------- smart alignment guides (shown while dragging the logo) ----------
+  // ---------- smart alignment guides (shown while dragging the logo or text) ----------
   // beyond the always-on margin lines above, these appear only when the
-  // logo's edges or centre line up with the canvas centre or the text
-  // block's own edges/centre -- the same "does this line up with that other
-  // element" signal design tools give you, rather than a fixed reference.
+  // dragged object's edges or centre line up with the canvas centre or the
+  // *other* object's own edges/centre -- the same "does this line up with
+  // that other element" signal design tools give you, rather than a fixed
+  // reference. Whichever of the logo/text is being dragged is compared
+  // against the other one, symmetrically.
   function drawSmartGuides(W, H, textBounds) {
-    if (!showLogoGuides) return;
-    const r = logoRect(W, H);
-    if (!r) return;
+    if (!dragGuideTarget) return;
+    const logo = logoRect(W, H);
+    const text = textBounds ? { x: textBounds.left, y: textBounds.top, w: textBounds.right - textBounds.left, h: textBounds.bottom - textBounds.top } : null;
+    const dragged = dragGuideTarget === 'logo' ? logo : text;
+    const other = dragGuideTarget === 'logo' ? text : logo;
+    if (!dragged) return;
+
     const scale = W / 1080;
     const tol = 6 * scale;
 
@@ -2196,18 +2235,18 @@
     const marginVPx = H * state.marginVFrac;
     const xTargets = [W / 2, marginPx, W - marginPx];
     const yTargets = [H / 2, marginVPx, H - marginVPx];
-    if (textBounds) {
-      xTargets.push(textBounds.left, textBounds.right, (textBounds.left + textBounds.right) / 2);
-      yTargets.push(textBounds.top, textBounds.bottom, (textBounds.top + textBounds.bottom) / 2);
+    if (other) {
+      xTargets.push(other.x, other.x + other.w, other.x + other.w / 2);
+      yTargets.push(other.y, other.y + other.h, other.y + other.h / 2);
     }
 
-    const logoXs = [r.x, r.x + r.w, r.x + r.w / 2];
-    const logoYs = [r.y, r.y + r.h, r.y + r.h / 2];
+    const draggedXs = [dragged.x, dragged.x + dragged.w, dragged.x + dragged.w / 2];
+    const draggedYs = [dragged.y, dragged.y + dragged.h, dragged.y + dragged.h / 2];
 
     const matchedX = new Set();
     const matchedY = new Set();
-    xTargets.forEach((t) => { if (logoXs.some((lx) => Math.abs(lx - t) <= tol)) matchedX.add(Math.round(t)); });
-    yTargets.forEach((t) => { if (logoYs.some((ly) => Math.abs(ly - t) <= tol)) matchedY.add(Math.round(t)); });
+    xTargets.forEach((t) => { if (draggedXs.some((dx) => Math.abs(dx - t) <= tol)) matchedX.add(Math.round(t)); });
+    yTargets.forEach((t) => { if (draggedYs.some((dy) => Math.abs(dy - t) <= tol)) matchedY.add(Math.round(t)); });
     if (matchedX.size === 0 && matchedY.size === 0) return;
 
     ctx.save();
@@ -2254,7 +2293,7 @@
     drawLogo(W, H);
     drawEffects(W, H, state.effects);
     if (includeEditingAids) {
-      drawLogoGuides(W, H);
+      drawDragGuides(W, H);
       drawSmartGuides(W, H, textBounds);
       drawSafeZone(W, H);
     }
@@ -2381,9 +2420,11 @@
   viewZoomInBtn.addEventListener('click', () => setViewZoom(viewZoom + VIEW_ZOOM_STEP));
   viewZoomOutBtn.addEventListener('click', () => setViewZoom(viewZoom - VIEW_ZOOM_STEP));
 
-  // ---------- logo drag + photo pan/zoom (mode-exclusive on the canvas) ----------
+  // ---------- logo drag + text drag + photo pan/zoom (mode-exclusive on the canvas) ----------
 
   let dragging = false; // logo drag
+  let textDragging = false;
+  let textDragStart = null; // { clientX, clientY, vAlign, crossAlign }
   let photoDragging = false; // photo pan
   let panStart = null; // { clientX, clientY, offsetXPct, offsetYPct }
   const activePointers = new Map(); // pointerId -> {x, y}, for pinch-zoom
@@ -2485,15 +2526,37 @@
       return;
     }
 
-    if (!state.logo.img) return;
     const p = clientToCanvas(e.clientX, e.clientY);
-    const r = logoRect(state.canvasW, state.canvasH);
-    if (!r) return;
-    if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) {
-      dragging = true;
-      showLogoGuides = true;
-      canvas.setPointerCapture(e.pointerId);
-      render();
+
+    if (state.logo.img) {
+      const r = logoRect(state.canvasW, state.canvasH);
+      // logo takes priority over text when they overlap, matching that it's
+      // drawn on top of the text in the composite
+      if (r && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) {
+        dragging = true;
+        dragGuideTarget = 'logo';
+        canvas.setPointerCapture(e.pointerId);
+        render();
+        return;
+      }
+    }
+
+    const layout = computeTextLayout(state.canvasW, state.canvasH);
+    if (layout) {
+      const b = computeTextBoundsFromLayout(state.canvasW, state.canvasH, layout);
+      // a little slop around the tight text bounds -- makes it easier to grab
+      // (rather than needing to hit the exact glyph edges), and absorbs the
+      // odd sub-pixel rounding difference between the click point and a bound
+      // that landed exactly on it (e.g. a drag that starts right at the last
+      // line's baseline).
+      const pad = 14 * (state.canvasW / 1080);
+      if (p.x >= b.left - pad && p.x <= b.right + pad && p.y >= b.top - pad && p.y <= b.bottom + pad) {
+        textDragging = true;
+        dragGuideTarget = 'text';
+        textDragStart = { clientX: e.clientX, clientY: e.clientY, vAlign: state.text.vAlign, crossAlign: state.text.crossAlign };
+        canvas.setPointerCapture(e.pointerId);
+        render();
+      }
     }
   });
 
@@ -2534,13 +2597,47 @@
       return;
     }
 
-    if (!dragging) return;
-    const p = clientToCanvas(e.clientX, e.clientY);
-    const clamped = clampLogoPosition(p.x / state.canvasW, p.y / state.canvasH);
-    state.logo.xPct = clamped.xPct;
-    state.logo.yPct = clamped.yPct;
-    state.logo.manuallyPositioned = true;
-    render();
+    if (dragging) {
+      const p = clientToCanvas(e.clientX, e.clientY);
+      const clamped = clampLogoPosition(p.x / state.canvasW, p.y / state.canvasH);
+      state.logo.xPct = clamped.xPct;
+      state.logo.yPct = clamped.yPct;
+      state.logo.manuallyPositioned = true;
+      render();
+      return;
+    }
+
+    if (textDragging && textDragStart) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = state.canvasW / rect.width;
+      const scaleY = state.canvasH / rect.height;
+      const dxCanvas = (e.clientX - textDragStart.clientX) * scaleX;
+      const dyCanvas = (e.clientY - textDragStart.clientY) * scaleY;
+      const layout = computeTextLayout(state.canvasW, state.canvasH);
+      if (!layout) return;
+      const vSpan = (layout.bottommostY - layout.topmostY) || 1;
+      const cSpan = (layout.rightmostX - layout.leftmostX) || 1;
+      // converts real canvas-pixel drag deltas into vAlign/crossAlign
+      // fraction deltas -- the mapping depends on orientation, since
+      // vertical text's two axes are rotated relative to the screen (see
+      // computeTextLayout's rotation-matrix comment)
+      let dVAlignFrac, dCrossFrac;
+      if (!layout.vertical) {
+        dVAlignFrac = dyCanvas / vSpan;
+        dCrossFrac = dxCanvas / cSpan;
+      } else if (layout.orientation === 'vertical-flipped') {
+        dVAlignFrac = dxCanvas / vSpan;
+        dCrossFrac = -dyCanvas / cSpan;
+      } else {
+        dVAlignFrac = -dxCanvas / vSpan;
+        dCrossFrac = dyCanvas / cSpan;
+      }
+      state.text.vAlign = Math.min(100, Math.max(0, textDragStart.vAlign + dVAlignFrac * 100));
+      state.text.crossAlign = Math.min(100, Math.max(0, textDragStart.crossAlign + dCrossFrac * 100));
+      textVPos.value = Math.round(state.text.vAlign);
+      textCrossAlign.value = Math.round(state.text.crossAlign);
+      render();
+    }
   });
 
   function endDrag(e) {
@@ -2571,7 +2668,9 @@
       return;
     }
     dragging = false;
-    showLogoGuides = false;
+    textDragging = false;
+    textDragStart = null;
+    dragGuideTarget = null;
     render();
   }
   canvas.addEventListener('pointerup', endDrag);
