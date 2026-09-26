@@ -1959,10 +1959,13 @@
     const layers = getActiveLayers();
     const built = [];
     let totalHeight = 0;
+    let maxLineWidth = 0; // widest single line across all layers -- the block's actual (tighter than maxWidth) footprint, used for alignment guides
 
     layers.forEach((l, idx) => {
       const sizePx = (l.size / 1080) * W; // scale relative to a 1080-wide reference so it's consistent across presets
       const lines = wrapText(l.text, maxWidth, sizePx, l);
+      // ctx.font is already set to this layer's font/size by wrapText, above
+      lines.forEach((line) => { maxLineWidth = Math.max(maxLineWidth, ctx.measureText(line).width); });
       const lineHeight = sizePx * lineGapFactor;
       const blockH = lines.length * lineHeight;
       built.push({ ...l, sizePx, lines, lineHeight, blockH });
@@ -1970,7 +1973,7 @@
       if (idx < layers.length - 1) totalHeight += layerGap;
     });
 
-    return { built, totalHeight, margin, maxWidth, layerGap };
+    return { built, totalHeight, margin, maxWidth, layerGap, maxLineWidth };
   }
 
   // "vertical" rotates the whole block 90° so it reads top-to-bottom;
@@ -1985,7 +1988,7 @@
     const vertical = orientation !== 'horizontal';
     const effW = vertical ? H : W, effH = vertical ? W : H;
 
-    const { built, totalHeight, margin } = buildTextBlock(effW, effH);
+    const { built, totalHeight, margin, maxLineWidth } = buildTextBlock(effW, effH);
     if (built.length === 0) return null;
 
     // vAlign is 0 (top) .. 100 (bottom) along the block's own stacking
@@ -2036,15 +2039,24 @@
     });
     ctx.restore();
 
-    if (!vertical) return { top: startY, bottom: startY + totalHeight, left: 0, right: W };
+    // tight bounds (using the widest actual line, not the full wrap width)
+    // for alignment guides and the legibility check alike
+    if (!vertical) {
+      let left, right;
+      if (state.text.hAlign === 'left') { left = margin; right = margin + maxLineWidth; }
+      else if (state.text.hAlign === 'right') { left = W - margin - maxLineWidth; right = W - margin; }
+      else { left = W / 2 - maxLineWidth / 2; right = W / 2 + maxLineWidth / 2; }
+      return { top: startY, bottom: startY + totalHeight, left, right };
+    }
     // rotated ±90° about the canvas centre: the block's local stacking span
-    // [startY, startY+totalHeight] maps onto a vertical *band* of x in real
-    // canvas space (full height, since the block's other axis -- 0..effW --
-    // sweeps the whole of H once rotated). See the two rotation matrices:
-    // +90° reverses the span (band runs from the far/right edge inward),
-    // -90° keeps it in the same order (band runs from the near/left edge).
+    // [startY, startY+totalHeight] maps onto a vertical band of x in real
+    // canvas space, and the (centred) cross-axis span around `x` maps onto
+    // a band of y -- see the rotation matrices in the comments above `x`.
     const bandNear = orientation === 'vertical-flipped' ? startY : W - startY - totalHeight;
-    return { top: 0, bottom: H, left: bandNear, right: bandNear + totalHeight };
+    const halfLine = maxLineWidth / 2;
+    const top = orientation === 'vertical-flipped' ? H - x - halfLine : x - halfLine;
+    const bottom = orientation === 'vertical-flipped' ? H - x + halfLine : x + halfLine;
+    return { top, bottom, left: bandNear, right: bandNear + totalHeight };
   }
 
   // ---------- logo drawing ----------
@@ -2168,6 +2180,44 @@
     ctx.restore();
   }
 
+  // ---------- smart alignment guides (shown while dragging the logo) ----------
+  // beyond the always-on margin lines above, these appear only when the
+  // logo's edges or centre line up with the canvas centre or the text
+  // block's own edges/centre -- the same "does this line up with that other
+  // element" signal design tools give you, rather than a fixed reference.
+  function drawSmartGuides(W, H, textBounds) {
+    if (!showLogoGuides) return;
+    const r = logoRect(W, H);
+    if (!r) return;
+    const scale = W / 1080;
+    const tol = 6 * scale;
+
+    const marginPx = W * state.marginFrac;
+    const marginVPx = H * state.marginVFrac;
+    const xTargets = [W / 2, marginPx, W - marginPx];
+    const yTargets = [H / 2, marginVPx, H - marginVPx];
+    if (textBounds) {
+      xTargets.push(textBounds.left, textBounds.right, (textBounds.left + textBounds.right) / 2);
+      yTargets.push(textBounds.top, textBounds.bottom, (textBounds.top + textBounds.bottom) / 2);
+    }
+
+    const logoXs = [r.x, r.x + r.w, r.x + r.w / 2];
+    const logoYs = [r.y, r.y + r.h, r.y + r.h / 2];
+
+    const matchedX = new Set();
+    const matchedY = new Set();
+    xTargets.forEach((t) => { if (logoXs.some((lx) => Math.abs(lx - t) <= tol)) matchedX.add(Math.round(t)); });
+    yTargets.forEach((t) => { if (logoYs.some((ly) => Math.abs(ly - t) <= tol)) matchedY.add(Math.round(t)); });
+    if (matchedX.size === 0 && matchedY.size === 0) return;
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,71,133,0.95)'; // distinct from the margin guides' purple, so the two read as separate signals
+    ctx.lineWidth = Math.max(1.5, scale * 1.5);
+    matchedX.forEach((x) => { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); });
+    matchedY.forEach((y) => { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); });
+    ctx.restore();
+  }
+
   // ---------- safe zone overlay ----------
 
   function drawSafeZone(W, H) {
@@ -2205,6 +2255,7 @@
     drawEffects(W, H, state.effects);
     if (includeEditingAids) {
       drawLogoGuides(W, H);
+      drawSmartGuides(W, H, textBounds);
       drawSafeZone(W, H);
     }
     return textBounds;
