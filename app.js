@@ -76,6 +76,7 @@
       hAlign: 'center',
       vAlign: 100, // 0=top .. 100=bottom, continuous
       orientation: 'horizontal', // 'horizontal' | 'vertical' | 'vertical-flipped'
+      crossAlign: 50, // 0=top .. 100=bottom, continuous -- the block's position on the cross (non-stacking) axis, only used when orientation is vertical
       layers: {
         headline:  { text: 'New Season, New Look', font: 'playfair', size: 72, color: '#ffffff' },
         subheader: { text: 'Shop the collection today', font: 'worksans', size: 36, color: '#ffffff', enabled: true },
@@ -255,6 +256,7 @@
         hAlign: state.text.hAlign,
         vAlign: state.text.vAlign,
         orientation: state.text.orientation,
+        crossAlign: state.text.crossAlign,
         layers: {
           headline: { ...state.text.layers.headline },
           subheader: { ...state.text.layers.subheader },
@@ -288,6 +290,7 @@
     if (recipe.text) {
       if (recipe.text.hAlign) state.text.hAlign = recipe.text.hAlign;
       if (recipe.text.orientation) state.text.orientation = recipe.text.orientation;
+      if (typeof recipe.text.crossAlign === 'number') state.text.crossAlign = recipe.text.crossAlign;
       if (typeof recipe.text.vAlign === 'number') state.text.vAlign = recipe.text.vAlign;
       else {
         const legacy = legacyVAlignToNumber(recipe.text.vAlign);
@@ -789,9 +792,35 @@
       textVPosHint.textContent = `Slides the whole (rotated) text block left or right, without ever crossing the left/right edge padding.`;
     }
   }
+  const textHAlignRow = document.getElementById('textHAlignRow');
+  const textCrossAlignRow = document.getElementById('textCrossAlignRow');
+  const textCrossAlignRow2 = document.getElementById('textCrossAlignRow2');
+  const textCrossAlignHint = document.getElementById('textCrossAlignHint');
+  const textCrossAlign = document.getElementById('textCrossAlign');
+  function updateTextOrientationRows() {
+    const vertical = (state.text.orientation || 'horizontal') !== 'horizontal';
+    textHAlignRow.style.display = vertical ? 'none' : 'flex';
+    textCrossAlignRow.style.display = vertical ? 'flex' : 'none';
+    textCrossAlignRow2.style.display = vertical ? 'flex' : 'none';
+    textCrossAlignHint.style.display = vertical ? 'block' : 'none';
+  }
   wireSegmented('textOrientation', (val) => {
+    // clicking the already-active *vertical* option again is a shortcut to
+    // snap both position sliders back to dead-centre, per the request to
+    // "get back to the middle" without having to drag each slider by hand
+    if (val === state.text.orientation && val !== 'horizontal') {
+      state.text.vAlign = 50;
+      state.text.crossAlign = 50;
+      textVPos.value = 50;
+      textCrossAlign.value = 50;
+    }
     state.text.orientation = val;
     updateTextVPosLabels();
+    updateTextOrientationRows();
+    render();
+  });
+  textCrossAlign.addEventListener('input', () => {
+    state.text.crossAlign = Number(textCrossAlign.value);
     render();
   });
   wireSegmented('logoPreset', (val) => {
@@ -1967,7 +1996,20 @@
     const startY = topmostY + (bottommostY - topmostY) * (state.text.vAlign / 100);
 
     let x;
-    if (state.text.hAlign === 'left') { ctx.textAlign = 'left'; x = margin; }
+    if (vertical) {
+      // the block's position on the cross (non-stacking) axis -- after
+      // rotation this is the screen's vertical axis, so it gets its own
+      // continuous slider (crossAlign) instead of the 3-way hAlign used in
+      // horizontal mode. 0=screen-top .. 100=screen-bottom; which way that
+      // maps onto local x depends on the rotation direction (derived from
+      // the same rotation matrices as the returned legibility bounds below).
+      const leftmostX = margin, rightmostX = effW - margin;
+      const crossFrac = (typeof state.text.crossAlign === 'number' ? state.text.crossAlign : 50) / 100;
+      x = orientation === 'vertical-flipped'
+        ? rightmostX + (leftmostX - rightmostX) * crossFrac
+        : leftmostX + (rightmostX - leftmostX) * crossFrac;
+      ctx.textAlign = 'center';
+    } else if (state.text.hAlign === 'left') { ctx.textAlign = 'left'; x = margin; }
     else if (state.text.hAlign === 'right') { ctx.textAlign = 'right'; x = effW - margin; }
     else { ctx.textAlign = 'center'; x = effW / 2; }
 
@@ -2747,7 +2789,9 @@
     setSegmentedActive('textHAlign', state.text.hAlign);
     setSegmentedActive('textOrientation', state.text.orientation || 'horizontal');
     updateTextVPosLabels();
+    updateTextOrientationRows();
     textVPos.value = state.text.vAlign;
+    textCrossAlign.value = typeof state.text.crossAlign === 'number' ? state.text.crossAlign : 50;
 
     fadeReach.value = state.fade.reach;
     fadeReachVal.textContent = `${state.fade.reach}%`;

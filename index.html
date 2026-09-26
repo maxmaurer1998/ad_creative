@@ -199,7 +199,7 @@
 
     <!-- TEXT PANEL -->
     <div class="panel" id="panel-text">
-      <div class="control-row">
+      <div class="control-row" id="textHAlignRow">
         <label>Text block alignment</label>
         <div class="segmented" id="textHAlign">
           <button data-val="left">Left</button>
@@ -224,6 +224,15 @@
         <span>Bottom</span>
       </div>
       <p class="hint-text" id="textVPosHint">Slides the whole text block up or down, without ever crossing the top/bottom edge padding. If you're on the Story/Reels preset, turn on "Show safe zone" (Canvas tab) to check the text won't sit under Instagram's own UI.</p>
+      <div class="control-row" id="textCrossAlignRow" style="display:none;">
+        <label for="textCrossAlign">Vertical position</label>
+        <input type="range" id="textCrossAlign" min="0" max="100" value="50" />
+      </div>
+      <div class="range-scale-labels" id="textCrossAlignRow2" style="display:none;">
+        <span>Top</span>
+        <span>Bottom</span>
+      </div>
+      <p class="hint-text" id="textCrossAlignHint" style="display:none;">Slides the (rotated) text block up or down the frame. Defaults to the middle — click the active "Vertical" button again any time to snap both position sliders back to centre.</p>
       <p class="hint-text">"Vertical" rotates the whole text block (all lines, stacked in the same order) 90° so it reads top-to-bottom; "Vertical (flipped)" rotates it the other way, for reading bottom-to-top. Font, size, colour and alignment all still work the same per line — only the block's orientation changes.</p>
 
       <div class="layer-tabs" id="layerTabs">
