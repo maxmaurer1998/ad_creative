@@ -203,7 +203,11 @@
   }
 
   // for stores created with a keyPath (folders/projects) -- the key lives
-  // inside the value itself, so it must NOT be passed separately
+  // inside the value itself, so it must NOT be passed separately.
+  // Returns whether the write actually succeeded -- callers that need to
+  // know (e.g. "Save", which shouldn't claim success on a failed write) can
+  // check it; callers that don't care can just ignore the return value, same
+  // as before.
   async function idbPut(store, value) {
     try {
       const db = await idbOpen();
@@ -213,7 +217,11 @@
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
       });
-    } catch (e) { /* ignore */ }
+      return true;
+    } catch (e) {
+      console.error(`idbPut(${store}) failed`, e);
+      return false;
+    }
   }
 
   async function idbGetAllValues(store) {
@@ -658,14 +666,34 @@
     });
   }
 
+  // re-derives a usable image Blob straight from an already-loaded
+  // HTMLImageElement -- a fallback for when the original upload's Blob/File
+  // isn't available to save (see captureProjectFields below), so a project
+  // never silently saves without the photo/logo that's visibly on screen
+  function imageElementToBlob(img) {
+    return new Promise((resolve) => {
+      const off = document.createElement('canvas');
+      off.width = img.naturalWidth;
+      off.height = img.naturalHeight;
+      off.getContext('2d').drawImage(img, 0, 0);
+      off.toBlob((blob) => resolve(blob), 'image/png');
+    });
+  }
+
   // gathers everything a saved project record needs from the current working
-  // state -- shared by "Save" (overwrite in place) and "Save as" (new record)
+  // state -- shared by "Save" (overwrite in place) and "Save as" (new record).
+  // Falls back to re-deriving the photo/logo Blob from the loaded image
+  // itself if the tracked upload Blob is missing for any reason, so "Save"
+  // always captures what's actually on screen rather than silently saving a
+  // project with no image.
   async function captureProjectFields() {
     const thumbnailBlob = await makeThumbnail();
-    const photoBlob = currentPhotoBlob;
+    let photoBlob = currentPhotoBlob;
+    if (!photoBlob && state.image) photoBlob = await imageElementToBlob(state.image);
     let logoBlob = null;
     if (state.logo.img) {
       logoBlob = currentLogoBlob || (await idbGet(IDB_STORE_KV, 'savedLogo')) || null;
+      if (!logoBlob) logoBlob = await imageElementToBlob(state.logo.img);
     }
     return {
       recipe: serializeRecipe(),
@@ -692,7 +720,8 @@
       name: name.trim(),
       ...(await captureProjectFields()),
     };
-    await idbPut(IDB_STORE_PROJECTS, project);
+    const ok = await idbPut(IDB_STORE_PROJECTS, project);
+    if (!ok) { alert("Couldn't save this project -- your browser's storage may be full. Try freeing up space (e.g. deleting an old saved project) and save again."); return; }
     setCurrentProject({ id: project.id, name: project.name, folderId: project.folderId });
     renderLibrary();
   }
@@ -712,7 +741,8 @@
         name: name.trim(),
         ...(await captureProjectFields()),
       };
-      await idbPut(IDB_STORE_PROJECTS, project);
+      const ok = await idbPut(IDB_STORE_PROJECTS, project);
+      if (!ok) { alert("Couldn't save this project -- your browser's storage may be full. Try freeing up space (e.g. deleting an old saved project) and save again."); return false; }
       setCurrentProject({ id: project.id, name: project.name, folderId: project.folderId });
       renderLibrary();
       return true;
@@ -723,7 +753,8 @@
       name: currentProject.name,
       ...(await captureProjectFields()),
     };
-    await idbPut(IDB_STORE_PROJECTS, project);
+    const ok = await idbPut(IDB_STORE_PROJECTS, project);
+    if (!ok) { alert("Couldn't save -- your browser's storage may be full. Try freeing up space (e.g. deleting an old saved project) and save again."); return false; }
     renderLibrary();
     return true;
   }
