@@ -2520,32 +2520,63 @@
     scheduleSaveRecipe();
   }
 
-  // A cached pyramid of progressively-halved copies of a photo. Some browsers
-  // (Safari in particular) can leave a thin dark fringe along the outermost
-  // edge of an image when a single drawImage call scales it down a lot in
-  // one step -- most visible right where the photo meets the plain white
-  // margin while zoomed out. Scaling down in several small steps instead
-  // (the same idea as real mipmapping) keeps every individual step's ratio
-  // small enough that browsers render it cleanly. The pyramid is cached per
-  // image so this only costs anything once per photo, not on every
-  // drag/zoom frame.
+  // A cached pyramid of progressively-halved copies of a photo, each padded
+  // with a few pixels of its own edge colour, extended outward. Some
+  // browsers (this matches a known Safari quirk) sample slightly *past* the
+  // edge of an image's source rectangle while smoothing a downscale -- past
+  // the true edge there's nothing, which reads as transparent black and
+  // shows up as a thin dark fringe right where the photo meets the plain
+  // white margin while zoomed out. Padding gives that over-read real,
+  // matching-coloured pixels to land on instead of black; downscaling in
+  // several small steps (the same idea as real mipmapping) rather than one
+  // big jump keeps every step's ratio -- and so the padding it needs -- small
+  // and constant regardless of overall zoom. Cached per image so building
+  // the pyramid only costs anything once per photo, not on every drag/zoom
+  // frame.
+  const EDGE_PAD = 4;
   let downscalePyramidCache = { img: null, levels: null };
+  function padEdges(srcCanvasOrImg, w, h) {
+    // draws srcCanvasOrImg's own edge pixels into a new canvas EDGE_PAD px
+    // larger on all sides, extended/clamped outward -- top/bottom/left/right
+    // strips stretched from a 1px source sliver, corners from a 1x1 pixel
+    const padded = document.createElement('canvas');
+    padded.width = w + EDGE_PAD * 2;
+    padded.height = h + EDGE_PAD * 2;
+    const pctx = padded.getContext('2d');
+    pctx.drawImage(srcCanvasOrImg, 0, 0, w, h, EDGE_PAD, EDGE_PAD, w, h);
+    pctx.drawImage(srcCanvasOrImg, 0, 0, w, 1, EDGE_PAD, 0, w, EDGE_PAD); // top
+    pctx.drawImage(srcCanvasOrImg, 0, h - 1, w, 1, EDGE_PAD, EDGE_PAD + h, w, EDGE_PAD); // bottom
+    pctx.drawImage(srcCanvasOrImg, 0, 0, 1, h, 0, EDGE_PAD, EDGE_PAD, h); // left
+    pctx.drawImage(srcCanvasOrImg, w - 1, 0, 1, h, EDGE_PAD + w, EDGE_PAD, EDGE_PAD, h); // right
+    pctx.drawImage(srcCanvasOrImg, 0, 0, 1, 1, 0, 0, EDGE_PAD, EDGE_PAD); // corners
+    pctx.drawImage(srcCanvasOrImg, w - 1, 0, 1, 1, EDGE_PAD + w, 0, EDGE_PAD, EDGE_PAD);
+    pctx.drawImage(srcCanvasOrImg, 0, h - 1, 1, 1, 0, EDGE_PAD + h, EDGE_PAD, EDGE_PAD);
+    pctx.drawImage(srcCanvasOrImg, w - 1, h - 1, 1, 1, EDGE_PAD + w, EDGE_PAD + h, EDGE_PAD, EDGE_PAD);
+    return padded;
+  }
   function getDownscalePyramid(img) {
     if (downscalePyramidCache.img === img) return downscalePyramidCache.levels;
-    const levels = [{ source: img, w: img.naturalWidth, h: img.naturalHeight }];
-    let w = img.naturalWidth, h = img.naturalHeight;
-    while (w > 64 && h > 64) {
-      const nextW = Math.max(1, Math.round(w / 2));
-      const nextH = Math.max(1, Math.round(h / 2));
-      const off = document.createElement('canvas');
-      off.width = nextW;
-      off.height = nextH;
-      const octx = off.getContext('2d');
-      octx.imageSmoothingEnabled = true;
-      octx.imageSmoothingQuality = 'high';
-      octx.drawImage(levels[levels.length - 1].source, 0, 0, w, h, 0, 0, nextW, nextH);
-      levels.push({ source: off, w: nextW, h: nextH });
-      w = nextW; h = nextH;
+    // level 0: the full-resolution image, padded -- innerX/Y/W/H is always
+    // the sub-rectangle of `canvas` that's the actual (unpadded) photo
+    const w0 = img.naturalWidth, h0 = img.naturalHeight;
+    const levels = [{ canvas: padEdges(img, w0, h0), innerX: EDGE_PAD, innerY: EDGE_PAD, innerW: w0, innerH: h0 }];
+    let prev = levels[0];
+    while (prev.innerW > 64 && prev.innerH > 64) {
+      const nextInnerW = Math.max(1, Math.round(prev.innerW / 2));
+      const nextInnerH = Math.max(1, Math.round(prev.innerH / 2));
+      // downscale just the unpadded inner region (not the previous level's
+      // own padding, which would otherwise compound into a visible border)
+      // into a fresh canvas of exactly that size, then re-pad it
+      const half = document.createElement('canvas');
+      half.width = nextInnerW;
+      half.height = nextInnerH;
+      const hctx = half.getContext('2d');
+      hctx.imageSmoothingEnabled = true;
+      hctx.imageSmoothingQuality = 'high';
+      hctx.drawImage(prev.canvas, prev.innerX, prev.innerY, prev.innerW, prev.innerH, 0, 0, nextInnerW, nextInnerH);
+      const next = { canvas: padEdges(half, nextInnerW, nextInnerH), innerX: EDGE_PAD, innerY: EDGE_PAD, innerW: nextInnerW, innerH: nextInnerH };
+      levels.push(next);
+      prev = next;
     }
     downscalePyramidCache = { img, levels };
     return levels;
@@ -2556,7 +2587,7 @@
   function pickDownscaleSource(img, targetW, targetH) {
     const levels = getDownscalePyramid(img);
     for (const level of levels) {
-      if (level.w <= targetW * 2 || level.h <= targetH * 2) return level;
+      if (level.innerW <= targetW * 2 || level.innerH <= targetH * 2) return level;
     }
     return levels[levels.length - 1];
   }
@@ -2593,19 +2624,19 @@
   // source point regardless of rotation; only where that point ends up on
   // screen changes.
   //
-  // The image is drawn from a cached downscale pyramid (above), not the
-  // original bitmap directly, to avoid a thin dark edge fringe some
+  // The image is drawn from a cached, edge-padded downscale pyramid (above),
+  // not the original bitmap directly, to avoid a thin dark edge fringe some
   // browsers introduce when scaling down a lot in one step.
   function drawImageCover(img, W, H) {
     const t = state.imageTransform;
     const rotation = t.rotation || 0;
     const scale = coverScaleFor(img, W, H) * t.zoom;
     const destW = img.naturalWidth * scale, destH = img.naturalHeight * scale;
-    const { source, w: srcW, h: srcH } = pickDownscaleSource(img, destW, destH);
+    const level = pickDownscaleSource(img, destW, destH);
     ctx.save();
     ctx.translate(W / 2, H / 2);
     if (rotation) ctx.rotate((rotation * Math.PI) / 180);
-    ctx.drawImage(source, 0, 0, srcW, srcH, -t.offsetXPct * destW, -t.offsetYPct * destH, destW, destH);
+    ctx.drawImage(level.canvas, level.innerX, level.innerY, level.innerW, level.innerH, -t.offsetXPct * destW, -t.offsetYPct * destH, destW, destH);
     ctx.restore();
   }
 
