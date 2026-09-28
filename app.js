@@ -61,6 +61,9 @@
       manuallyPositioned: false,
       colorMode: 'original', // 'original' | 'custom' | 'fade'
       customColor: '#ffffff',
+      rotation: 0,   // 0 | 90 | 180 | 270 -- clockwise, about the logo's own centre
+      flipH: false,  // mirrored left/right, applied before rotation
+      flipV: false,  // mirrored top/bottom, applied before rotation
     },
     fade: {
       direction: 'bottom',
@@ -270,6 +273,9 @@
         manuallyPositioned: state.logo.manuallyPositioned,
         colorMode: state.logo.colorMode,
         customColor: state.logo.customColor,
+        rotation: state.logo.rotation,
+        flipH: state.logo.flipH,
+        flipV: state.logo.flipV,
       },
       effects: { ...state.effects },
     };
@@ -304,7 +310,7 @@
       if (typeof state.text.layers.subheader.enabled !== 'boolean') state.text.layers.subheader.enabled = true; // pre-subheaderEnabled recipes
     }
     if (recipe.logo) {
-      const { xPct, yPct, sizePct, manuallyPositioned, colorMode, customColor, matchFadeColor } = recipe.logo;
+      const { xPct, yPct, sizePct, manuallyPositioned, colorMode, customColor, matchFadeColor, rotation, flipH, flipV } = recipe.logo;
       if (typeof xPct === 'number') state.logo.xPct = xPct;
       if (typeof yPct === 'number') state.logo.yPct = yPct;
       if (typeof sizePct === 'number') state.logo.sizePct = sizePct;
@@ -312,6 +318,9 @@
       if (typeof customColor === 'string') state.logo.customColor = customColor;
       if (typeof colorMode === 'string') state.logo.colorMode = colorMode;
       else if (typeof matchFadeColor === 'boolean') state.logo.colorMode = matchFadeColor ? 'fade' : 'original'; // pre-colorMode recipes
+      state.logo.rotation = [0, 90, 180, 270].includes(rotation) ? rotation : 0; // pre-rotation recipes
+      state.logo.flipH = typeof flipH === 'boolean' ? flipH : false;
+      state.logo.flipV = typeof flipV === 'boolean' ? flipV : false;
     }
   }
 
@@ -1004,6 +1013,32 @@
   logoVPos.addEventListener('input', () => {
     state.logo.yPct = logoVPosValueToYPct(Number(logoVPos.value));
     state.logo.manuallyPositioned = true;
+    render();
+  });
+
+  // rotating swaps the logo's on-screen width/height, which can push it
+  // outside the current margins at its current size -- reclamp afterward,
+  // same as changing size does
+  document.getElementById('logoRotate').addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    const delta = btn.dataset.val === 'left' ? -90 : 90;
+    state.logo.rotation = ((state.logo.rotation || 0) + delta + 360) % 360;
+    const clamped = clampLogoPosition(state.logo.xPct, state.logo.yPct);
+    state.logo.xPct = clamped.xPct;
+    state.logo.yPct = clamped.yPct;
+    logoVPos.value = yPctToLogoVPosValue(state.logo.yPct);
+    render();
+  });
+
+  // flip buttons are independent on/off toggles, not an exclusive choice --
+  // wireSegmented doesn't fit, so they're wired directly
+  document.getElementById('logoFlip').addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    if (btn.dataset.val === 'h') state.logo.flipH = !state.logo.flipH;
+    else state.logo.flipV = !state.logo.flipV;
+    btn.classList.toggle('active');
     render();
   });
 
@@ -2094,13 +2129,22 @@
 
   // ---------- logo drawing ----------
 
+  // half-width/height of the logo's on-screen (post-rotation) bounding box,
+  // as fractions of the canvas -- a 90/270 rotation swaps which of the
+  // image's natural dimensions drives width vs height on screen
+  function logoHalfFracs() {
+    const sizeFrac = state.logo.sizePct / 100;
+    const rawAspect = state.logo.img ? state.logo.img.naturalHeight / state.logo.img.naturalWidth : 1;
+    const swapped = state.logo.rotation === 90 || state.logo.rotation === 270;
+    const halfW = (swapped ? sizeFrac * rawAspect : sizeFrac) / 2;
+    const halfH = ((swapped ? sizeFrac : sizeFrac * rawAspect) / 2) * (state.canvasW / state.canvasH);
+    return { halfW, halfH };
+  }
+
   function applyLogoCorner(corner) {
     const margin = state.marginFrac;
     const marginV = state.marginVFrac;
-    const sizeFrac = state.logo.sizePct / 100;
-    const halfW = sizeFrac / 2;
-    const aspect = state.logo.img ? state.logo.img.naturalHeight / state.logo.img.naturalWidth : 1;
-    const halfH = (sizeFrac * aspect) / 2 * (state.canvasW / state.canvasH);
+    const { halfW, halfH } = logoHalfFracs();
 
     if (corner === 'top-left') { state.logo.xPct = margin + halfW; state.logo.yPct = marginV + halfH; }
     else if (corner === 'top-right') { state.logo.xPct = 1 - margin - halfW; state.logo.yPct = marginV + halfH; }
@@ -2118,10 +2162,7 @@
   // clamp the logo's center x so its left/right edges never cross the same
   // margin used by the text block, at any logo size
   function getLogoBounds() {
-    const sizeFrac = state.logo.sizePct / 100;
-    const halfW = sizeFrac / 2;
-    const aspect = state.logo.img ? state.logo.img.naturalHeight / state.logo.img.naturalWidth : 1;
-    const halfH = (sizeFrac * aspect) / 2 * (state.canvasW / state.canvasH);
+    const { halfW, halfH } = logoHalfFracs();
     return {
       minX: state.marginFrac + halfW,
       maxX: 1 - state.marginFrac - halfW,
@@ -2150,11 +2191,18 @@
 
   function logoRect(W, H) {
     if (!state.logo.img) return null;
-    const w = (state.logo.sizePct / 100) * W;
-    const h = w * (state.logo.img.naturalHeight / state.logo.img.naturalWidth);
+    // baseW/baseH are the logo's own dimensions before rotation (what it's
+    // actually drawn at); w/h are the on-screen bounding box after rotation,
+    // swapped from base for a 90/270 turn -- used for hit-testing, margin
+    // clamping and alignment guides, which only care about the box it occupies
+    const baseW = (state.logo.sizePct / 100) * W;
+    const baseH = baseW * (state.logo.img.naturalHeight / state.logo.img.naturalWidth);
+    const swapped = state.logo.rotation === 90 || state.logo.rotation === 270;
+    const w = swapped ? baseH : baseW;
+    const h = swapped ? baseW : baseH;
     const cx = state.logo.xPct * W;
     const cy = state.logo.yPct * H;
-    return { x: cx - w / 2, y: cy - h / 2, w, h };
+    return { x: cx - w / 2, y: cy - h / 2, w, h, baseW, baseH };
   }
 
   // caches the last tinted version of the logo so we don't re-tint every frame
@@ -2183,7 +2231,12 @@
     let source = state.logo.img;
     if (state.logo.colorMode === 'fade') source = getTintedLogo(state.logo.img, state.fade.color);
     else if (state.logo.colorMode === 'custom') source = getTintedLogo(state.logo.img, state.logo.customColor);
-    ctx.drawImage(source, r.x, r.y, r.w, r.h);
+    ctx.save();
+    ctx.translate(state.logo.xPct * W, state.logo.yPct * H);
+    if (state.logo.rotation) ctx.rotate((state.logo.rotation * Math.PI) / 180);
+    ctx.scale(state.logo.flipH ? -1 : 1, state.logo.flipV ? -1 : 1);
+    ctx.drawImage(source, -r.baseW / 2, -r.baseH / 2, r.baseW, r.baseH);
+    ctx.restore();
   }
 
   // ---------- drag margin guide lines (shown while dragging the logo or text) ----------
@@ -2981,6 +3034,8 @@
     setSegmentedActive('logoColorMode', state.logo.colorMode);
     logoCustomColorRow.style.display = state.logo.colorMode === 'custom' ? 'flex' : 'none';
     document.getElementById('logoCustomColor').value = state.logo.customColor;
+    document.querySelector('#logoFlip button[data-val="h"]').classList.toggle('active', !!state.logo.flipH);
+    document.querySelector('#logoFlip button[data-val="v"]').classList.toggle('active', !!state.logo.flipV);
 
     marginSlider.value = Math.round(state.marginFrac * 100);
     marginVal.textContent = `${marginSlider.value}%`;
