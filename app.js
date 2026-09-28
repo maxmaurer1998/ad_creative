@@ -2520,6 +2520,47 @@
     scheduleSaveRecipe();
   }
 
+  // A cached pyramid of progressively-halved copies of a photo. Some browsers
+  // (Safari in particular) can leave a thin dark fringe along the outermost
+  // edge of an image when a single drawImage call scales it down a lot in
+  // one step -- most visible right where the photo meets the plain white
+  // margin while zoomed out. Scaling down in several small steps instead
+  // (the same idea as real mipmapping) keeps every individual step's ratio
+  // small enough that browsers render it cleanly. The pyramid is cached per
+  // image so this only costs anything once per photo, not on every
+  // drag/zoom frame.
+  let downscalePyramidCache = { img: null, levels: null };
+  function getDownscalePyramid(img) {
+    if (downscalePyramidCache.img === img) return downscalePyramidCache.levels;
+    const levels = [{ source: img, w: img.naturalWidth, h: img.naturalHeight }];
+    let w = img.naturalWidth, h = img.naturalHeight;
+    while (w > 64 && h > 64) {
+      const nextW = Math.max(1, Math.round(w / 2));
+      const nextH = Math.max(1, Math.round(h / 2));
+      const off = document.createElement('canvas');
+      off.width = nextW;
+      off.height = nextH;
+      const octx = off.getContext('2d');
+      octx.imageSmoothingEnabled = true;
+      octx.imageSmoothingQuality = 'high';
+      octx.drawImage(levels[levels.length - 1].source, 0, 0, w, h, 0, 0, nextW, nextH);
+      levels.push({ source: off, w: nextW, h: nextH });
+      w = nextW; h = nextH;
+    }
+    downscalePyramidCache = { img, levels };
+    return levels;
+  }
+
+  // picks the smallest pyramid level still at least ~2x the size actually
+  // being drawn at, so the final draw is always a safe, small-ratio scale
+  function pickDownscaleSource(img, targetW, targetH) {
+    const levels = getDownscalePyramid(img);
+    for (const level of levels) {
+      if (level.w <= targetW * 2 || level.h <= targetH * 2) return level;
+    }
+    return levels[levels.length - 1];
+  }
+
   // the scale that fills the frame exactly on one axis (and overflows the
   // other, which the canvas clips naturally) at zoom=1 -- the single
   // reference point the whole zoom range scales from. A 90/270 rotation
@@ -2551,15 +2592,20 @@
   // of the image's own, unrotated width/height -- always means the same
   // source point regardless of rotation; only where that point ends up on
   // screen changes.
+  //
+  // The image is drawn from a cached downscale pyramid (above), not the
+  // original bitmap directly, to avoid a thin dark edge fringe some
+  // browsers introduce when scaling down a lot in one step.
   function drawImageCover(img, W, H) {
     const t = state.imageTransform;
     const rotation = t.rotation || 0;
     const scale = coverScaleFor(img, W, H) * t.zoom;
     const destW = img.naturalWidth * scale, destH = img.naturalHeight * scale;
+    const { source, w: srcW, h: srcH } = pickDownscaleSource(img, destW, destH);
     ctx.save();
     ctx.translate(W / 2, H / 2);
     if (rotation) ctx.rotate((rotation * Math.PI) / 180);
-    ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, -t.offsetXPct * destW, -t.offsetYPct * destH, destW, destH);
+    ctx.drawImage(source, 0, 0, srcW, srcH, -t.offsetXPct * destW, -t.offsetYPct * destH, destW, destH);
     ctx.restore();
   }
 
