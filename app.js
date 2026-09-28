@@ -1444,7 +1444,20 @@
       outer = scrim;
       inner = 0;
     }
-    const rectStart = Math.min(outer, inner);
+
+    // the offscreen layer's pixel size has to be a whole number, but `scrim`
+    // (a percentage of the canvas) almost never is -- rounding it down, as a
+    // plain cast would, leaves the solid edge for 'bottom'/'right' up to ~1px
+    // short of the canvas's own edge, showing a sliver of the white/photo
+    // background underneath as a thin line. Using ceil() for the layer's
+    // size and anchoring the draw position from the solid edge backward
+    // (rather than from the transparent edge forward) guarantees that solid
+    // edge always lands exactly on the canvas boundary; drawPos replaces the
+    // old rectStart for both the draw position and the gradient's local
+    // coordinates, which absorb the sub-pixel difference on the transparent
+    // end instead, where it's imperceptible against near-zero alpha anyway.
+    const scrimPx = Math.ceil(scrim);
+    const drawPos = (fade.direction === 'bottom' || fade.direction === 'right') ? extent - scrimPx : 0;
 
     // build the gradient on its own transparent layer first (rather than
     // straight onto the already-opaque photo) so an optional texture pass
@@ -1452,13 +1465,13 @@
     // compositing over an opaque photo would flatten every pixel's alpha
     // to 1, breaking that falloff.
     const layer = document.createElement('canvas');
-    layer.width = vertical ? W : scrim;
-    layer.height = vertical ? scrim : H;
+    layer.width = vertical ? W : scrimPx;
+    layer.height = vertical ? scrimPx : H;
     const lctx = layer.getContext('2d');
 
     const grad = vertical
-      ? lctx.createLinearGradient(0, outer - rectStart, 0, inner - rectStart)
-      : lctx.createLinearGradient(outer - rectStart, 0, inner - rectStart, 0);
+      ? lctx.createLinearGradient(0, outer - drawPos, 0, inner - drawPos)
+      : lctx.createLinearGradient(outer - drawPos, 0, inner - drawPos, 0);
     const steps = 48;
     for (let s = 0; s <= steps; s++) {
       const frac = s / steps;
@@ -1476,8 +1489,8 @@
       lctx.globalAlpha = 1;
     }
 
-    if (vertical) ctx.drawImage(layer, 0, rectStart);
-    else ctx.drawImage(layer, rectStart, 0);
+    if (vertical) ctx.drawImage(layer, 0, drawPos);
+    else ctx.drawImage(layer, drawPos, 0);
   }
 
   // ---------- Fuji-inspired film-stock colour grade ----------
