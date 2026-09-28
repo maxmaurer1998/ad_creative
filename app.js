@@ -51,7 +51,7 @@
     marginFrac: DEFAULT_MARGIN_FRAC, // left/right margin, shared by text wrap and logo drag clamp
     marginVFrac: DEFAULT_MARGIN_V_FRAC, // top/bottom margin, shared by text vertical range and logo vertical clamp
     image: null,   // HTMLImageElement
-    imageTransform: { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5 }, // pan/zoom, tied to this specific photo
+    imageTransform: { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5, rotation: 0 }, // pan/zoom/rotation, tied to this specific photo
     positionEditMode: false, // true only while the Position tab is open
     logo: {
       img: null,
@@ -809,7 +809,7 @@
       if (project.imageTransform && typeof project.imageTransform.zoom === 'number') {
         state.imageTransform = project.imageTransform;
       } else {
-        state.imageTransform = { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5 };
+        state.imageTransform = { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5, rotation: 0 };
       }
 
       setCurrentProject({ id: project.id, name: project.name, folderId: project.folderId });
@@ -1196,8 +1196,19 @@
     render();
   });
 
+  document.getElementById('imageRotate').addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn || !state.image) return;
+    const delta = btn.dataset.val === 'left' ? -90 : 90;
+    state.imageTransform.rotation = ((state.imageTransform.rotation || 0) + delta + 360) % 360;
+    render();
+  });
+
   document.getElementById('resetImagePositionBtn').addEventListener('click', () => {
-    state.imageTransform = { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5 };
+    // pan/zoom only -- rotation is a deliberate orientation choice, not a
+    // "position", so it's left as-is (matching the logo's own rotate control,
+    // which position presets don't touch either)
+    state.imageTransform = { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5, rotation: state.imageTransform.rotation || 0 };
     imageZoom.value = 100;
     imageZoomVal.textContent = '100%';
     render();
@@ -1319,7 +1330,7 @@
     if (!file) return;
     loadImageFile(file, (img) => {
       state.image = img;
-      state.imageTransform = { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5 }; // reset crop for the new photo
+      state.imageTransform = { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5, rotation: 0 }; // reset crop/rotation for the new photo
       imageZoom.value = 100;
       imageZoomVal.textContent = '100%';
       videoKeyframeA = null; // old points don't apply to a new photo's content
@@ -2511,9 +2522,16 @@
 
   // the scale that fills the frame exactly on one axis (and overflows the
   // other, which the canvas clips naturally) at zoom=1 -- the single
-  // reference point the whole zoom range scales from.
+  // reference point the whole zoom range scales from. A 90/270 rotation
+  // swaps which of the image's natural dimensions ends up as its on-screen
+  // width vs height, so the "which axis is constrained" choice has to swap
+  // with it too, or the cover-fit would be computed for the wrong shape.
   function coverScaleFor(img, W, H) {
-    return Math.max(W / img.naturalWidth, H / img.naturalHeight);
+    const rotation = state.imageTransform.rotation || 0;
+    const swapped = rotation === 90 || rotation === 270;
+    const iw = swapped ? img.naturalHeight : img.naturalWidth;
+    const ih = swapped ? img.naturalWidth : img.naturalHeight;
+    return Math.max(W / iw, H / ih);
   }
 
   // The whole pan/zoom model is one formula: draw the *entire* source image
@@ -2527,13 +2545,22 @@
   // background (see paintComposite) shows around it as a margin that grows
   // continuously the further out you go -- one continuous linear scale, not
   // two different fits stitched together at a boundary.
+  //
+  // Rotation is applied as a canvas transform around the frame's centre,
+  // drawing the *unrotated* image so (offsetXPct, offsetYPct) -- a fraction
+  // of the image's own, unrotated width/height -- always means the same
+  // source point regardless of rotation; only where that point ends up on
+  // screen changes.
   function drawImageCover(img, W, H) {
     const t = state.imageTransform;
+    const rotation = t.rotation || 0;
     const scale = coverScaleFor(img, W, H) * t.zoom;
     const destW = img.naturalWidth * scale, destH = img.naturalHeight * scale;
-    const destX = W / 2 - t.offsetXPct * destW;
-    const destY = H / 2 - t.offsetYPct * destH;
-    ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, destX, destY, destW, destH);
+    ctx.save();
+    ctx.translate(W / 2, H / 2);
+    if (rotation) ctx.rotate((rotation * Math.PI) / 180);
+    ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, -t.offsetXPct * destW, -t.offsetYPct * destH, destW, destH);
+    ctx.restore();
   }
 
   // No clamping at all -- total freedom to position the image/focus point
@@ -2784,9 +2811,21 @@
         const scaleY = state.canvasH / rect.height;
         const dxCanvas = (e.clientX - panStart.clientX) * scaleX;
         const dyCanvas = (e.clientY - panStart.clientY) * scaleY;
+        // offsetXPct/offsetYPct are fractions of the *unrotated* image, but
+        // the drag happens in on-screen (rotated) space -- map the screen
+        // delta back into the image's own local axes first. This is the
+        // inverse of the draw rotation in drawImageCover, i.e. rotating the
+        // screen delta by -rotation (derived the same way as the vertical
+        // text drag mapping above).
+        const rotation = state.imageTransform.rotation || 0;
+        let du, dv;
+        if (rotation === 90) { du = dyCanvas; dv = -dxCanvas; }
+        else if (rotation === 180) { du = -dxCanvas; dv = -dyCanvas; }
+        else if (rotation === 270) { du = -dyCanvas; dv = dxCanvas; }
+        else { du = dxCanvas; dv = dyCanvas; }
         const scale = coverScaleFor(state.image, state.canvasW, state.canvasH) * state.imageTransform.zoom;
-        const dxFrac = -dxCanvas / (state.image.naturalWidth * scale);
-        const dyFrac = -dyCanvas / (state.image.naturalHeight * scale);
+        const dxFrac = -du / (state.image.naturalWidth * scale);
+        const dyFrac = -dv / (state.image.naturalHeight * scale);
         const clamped = clampImageOffset(
           panStart.offsetXPct + dxFrac, panStart.offsetYPct + dyFrac,
           state.imageTransform.zoom, state.image, state.canvasW, state.canvasH
@@ -3076,7 +3115,11 @@
       await new Promise((resolve) => {
         function frame(now) {
           const rawT = Math.min((now - startTime) / durationMs, 1);
-          state.imageTransform = lerpTransform(videoKeyframeA, videoKeyframeB, easeInOutT(rawT));
+          // rotation isn't part of the animated pan/zoom keyframes -- it's a
+          // fixed orientation choice, so it's carried through from the live
+          // transform rather than interpolated (there's nothing to interpolate:
+          // both keyframes were taken at whatever the current rotation is)
+          state.imageTransform = { ...lerpTransform(videoKeyframeA, videoKeyframeB, easeInOutT(rawT)), rotation: originalTransform.rotation || 0 };
           paintComposite(exportW, exportH, false);
           if (rawT < 1) requestAnimationFrame(frame);
           else resolve();
