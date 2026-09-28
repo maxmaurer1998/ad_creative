@@ -122,6 +122,7 @@
   const dropHint = document.getElementById('dropHint');
   const legibilityBanner = document.getElementById('legibilityBanner');
   const exportBtn = document.getElementById('exportBtn');
+  const saveBtn = document.getElementById('saveBtn');
   const imageInput = document.getElementById('imageInput');
   const logoInput = document.getElementById('logoInput');
   const presetSelect = document.getElementById('presetSelect');
@@ -353,6 +354,29 @@
   let currentPhotoBlob = null;
   let currentLogoBlob = null;
 
+  // the saved-project record this session is currently editing, if any --
+  // lets "Save" overwrite that same project in place instead of always
+  // prompting for a name like "Save As" does. Persisted in the KV store (not
+  // just in memory) so it survives a reload via the ordinary session
+  // auto-restore, not only a fresh "open project" from the library.
+  let currentProject = null; // { id, name, folderId } | null
+
+  function setCurrentProject(project) {
+    currentProject = project;
+    if (project) idbSet(IDB_STORE_KV, 'currentProject', project);
+    else idbDelete(IDB_STORE_KV, 'currentProject');
+    updateSaveButtonLabel();
+  }
+
+  function updateSaveButtonLabel() {
+    // keeps the button's own width constant regardless of the project name's
+    // length (which project it'll overwrite is in the title tooltip instead)
+    saveBtn.textContent = 'Save';
+    saveBtn.title = currentProject
+      ? `Save over "${currentProject.name}" -- use "Save as new here…" in the Library to save a copy instead`
+      : 'Save the current design as a new project in your library';
+  }
+
   function setCurrentPhotoBlob(blob) {
     currentPhotoBlob = blob || null;
     if (blob) idbSet(IDB_STORE_KV, 'photoBlob', blob);
@@ -366,13 +390,15 @@
   }
 
   async function restoreSession() {
-    const [recipe, photoBlob, logoBlob, savedLogoBlob, imageTransform] = await Promise.all([
+    const [recipe, photoBlob, logoBlob, savedLogoBlob, imageTransform, savedCurrentProject] = await Promise.all([
       idbGet(IDB_STORE_KV, 'recipe'),
       idbGet(IDB_STORE_KV, 'photoBlob'),
       idbGet(IDB_STORE_KV, 'logoBlob'),
       idbGet(IDB_STORE_KV, 'savedLogo'),
       idbGet(IDB_STORE_KV, 'imageTransform'),
+      idbGet(IDB_STORE_KV, 'currentProject'),
     ]);
+    if (savedCurrentProject) { currentProject = savedCurrentProject; updateSaveButtonLabel(); }
 
     if (recipe) applyRecipeToState(recipe);
 
@@ -383,6 +409,7 @@
         currentPhotoBlob = photoBlob;
         dropHint.classList.add('hidden');
         exportBtn.disabled = false;
+        saveBtn.disabled = false;
         if (imageTransform && typeof imageTransform.zoom === 'number') {
           state.imageTransform = imageTransform;
         }
@@ -400,12 +427,14 @@
   }
 
   async function clearSavedSession() {
-    // only clear this working session -- the saved default logo and any
-    // named recipe templates are deliberate, named saves and are kept
+    // only clear this working session -- the saved default logo, any named
+    // recipe templates, and the project library itself are deliberate,
+    // named saves and are kept
     await idbDelete(IDB_STORE_KV, 'recipe');
     await idbDelete(IDB_STORE_KV, 'photoBlob');
     await idbDelete(IDB_STORE_KV, 'logoBlob');
     await idbDelete(IDB_STORE_KV, 'imageTransform');
+    await idbDelete(IDB_STORE_KV, 'currentProject');
     try { localStorage.removeItem(LS_KEY); } catch (e) { /* ignore */ }
     location.reload();
   }
@@ -603,11 +632,13 @@
       if (!name || !name.trim()) return;
       project.name = name.trim();
       await idbPut(IDB_STORE_PROJECTS, project);
+      if (currentProject && currentProject.id === id) setCurrentProject({ ...currentProject, name: project.name });
       renderLibrary();
     } else if (action === 'delete-project') {
       const ok = confirm("Delete this saved project?\n\nThis can't be undone.");
       if (!ok) return;
       await idbDelete(IDB_STORE_PROJECTS, id);
+      if (currentProject && currentProject.id === id) setCurrentProject(null);
       renderLibrary();
     }
   }
@@ -627,22 +658,16 @@
     });
   }
 
-  async function saveProjectToCurrentFolder() {
-    if (!state.image) { alert('Upload a photo first.'); return; }
-    const name = prompt('Name this project:');
-    if (!name || !name.trim()) return;
-
+  // gathers everything a saved project record needs from the current working
+  // state -- shared by "Save" (overwrite in place) and "Save as" (new record)
+  async function captureProjectFields() {
     const thumbnailBlob = await makeThumbnail();
     const photoBlob = currentPhotoBlob;
     let logoBlob = null;
     if (state.logo.img) {
       logoBlob = currentLogoBlob || (await idbGet(IDB_STORE_KV, 'savedLogo')) || null;
     }
-
-    const project = {
-      id: makeId(),
-      folderId: libraryCurrentFolderId,
-      name: name.trim(),
+    return {
       recipe: serializeRecipe(),
       imageTransform: { ...state.imageTransform },
       photoBlob: photoBlob || null,
@@ -650,8 +675,57 @@
       thumbnailBlob,
       updatedAt: Date.now(),
     };
+  }
+
+  // "Save as" -- always creates a brand-new project record with a new name,
+  // into whichever folder is currently open in the library. Leaves any
+  // previously-saved project completely untouched, then becomes the project
+  // "Save" will overwrite from here on.
+  async function saveProjectToCurrentFolder() {
+    if (!state.image) { alert('Upload a photo first.'); return; }
+    const name = prompt('Save as new project named:', currentProject ? currentProject.name : '');
+    if (!name || !name.trim()) return;
+
+    const project = {
+      id: makeId(),
+      folderId: libraryCurrentFolderId,
+      name: name.trim(),
+      ...(await captureProjectFields()),
+    };
+    await idbPut(IDB_STORE_PROJECTS, project);
+    setCurrentProject({ id: project.id, name: project.name, folderId: project.folderId });
+    renderLibrary();
+  }
+
+  // "Save" -- overwrites the currently-open project in place (same id, name,
+  // and folder), so editing a design and hitting Save never creates a
+  // duplicate. With no project open yet, this is a first save and needs a
+  // name, same as "Save as" -- from then on it's the current project.
+  async function saveCurrentProject() {
+    if (!state.image) { alert('Upload a photo first.'); return false; }
+    if (!currentProject) {
+      const name = prompt('Name this project:');
+      if (!name || !name.trim()) return false;
+      const project = {
+        id: makeId(),
+        folderId: libraryCurrentFolderId,
+        name: name.trim(),
+        ...(await captureProjectFields()),
+      };
+      await idbPut(IDB_STORE_PROJECTS, project);
+      setCurrentProject({ id: project.id, name: project.name, folderId: project.folderId });
+      renderLibrary();
+      return true;
+    }
+    const project = {
+      id: currentProject.id,
+      folderId: currentProject.folderId,
+      name: currentProject.name,
+      ...(await captureProjectFields()),
+    };
     await idbPut(IDB_STORE_PROJECTS, project);
     renderLibrary();
+    return true;
   }
 
   async function openProject(id) {
@@ -666,11 +740,13 @@
           setCurrentPhotoBlob(project.photoBlob);
           dropHint.classList.add('hidden');
           exportBtn.disabled = false;
+          saveBtn.disabled = false;
         } else {
           state.image = null;
           setCurrentPhotoBlob(null);
           dropHint.classList.remove('hidden');
           exportBtn.disabled = true;
+          saveBtn.disabled = true;
           alert('This project\'s saved photo is damaged and could not be loaded. Its other settings (text, fade, logo) were still restored -- upload the photo again and re-save.');
         }
       } else {
@@ -678,6 +754,7 @@
         setCurrentPhotoBlob(null);
         dropHint.classList.remove('hidden');
         exportBtn.disabled = true;
+        saveBtn.disabled = true;
         alert('This project was saved without a photo, so the canvas is blank. Its other settings (text, fade, logo) were still restored -- upload a photo and re-save to fix it going forward.');
       }
 
@@ -696,6 +773,7 @@
         state.imageTransform = { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5 };
       }
 
+      setCurrentProject({ id: project.id, name: project.name, folderId: project.folderId });
       syncAllControlsFromState();
       applyPreset(state.preset);
       render();
@@ -733,6 +811,23 @@
     renderLibrary();
   });
   document.getElementById('librarySaveHereBtn').addEventListener('click', saveProjectToCurrentFolder);
+
+  saveBtn.addEventListener('click', async () => {
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    let ok = false;
+    try {
+      ok = await saveCurrentProject();
+    } finally {
+      saveBtn.disabled = !state.image;
+      if (ok) {
+        saveBtn.textContent = 'Saved ✓';
+        setTimeout(updateSaveButtonLabel, 1000);
+      } else {
+        updateSaveButtonLabel();
+      }
+    }
+  });
 
   // legacy fallback: versions before session-save only kept font/colour in localStorage
   function loadPrefs() {
@@ -1193,6 +1288,7 @@
       updateVideoKeyframeUI();
       dropHint.classList.add('hidden');
       exportBtn.disabled = false;
+      saveBtn.disabled = false;
       render();
     });
     setCurrentPhotoBlob(file);
@@ -3055,6 +3151,7 @@
 
     const { hasRecipe } = await restoreSession();
     if (!hasRecipe) loadPrefs();
+    updateSaveButtonLabel();
 
     syncAllControlsFromState();
     refreshRecipeList();
