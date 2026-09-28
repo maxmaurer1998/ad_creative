@@ -2626,17 +2626,64 @@
   //
   // The image is drawn from a cached, edge-padded downscale pyramid (above),
   // not the original bitmap directly, to avoid a thin dark edge fringe some
-  // browsers introduce when scaling down a lot in one step.
+  // browsers introduce when scaling down a lot in one step. Belt-and-braces
+  // against whatever's left of that fringe (confirmed still visible on at
+  // least one real device despite the above): whichever of the photo's own
+  // edges actually has visible white margin beyond it (i.e. really is
+  // "zoomed out" on that axis, not just cover-fit to it) gets its outermost
+  // few pixels feathered into that same white, painted right on top of it in
+  // the same rotated coordinate space -- so instead of trying to prevent
+  // whatever a given browser's downscale filter does at the true edge, any
+  // artifact it leaves is deliberately painted over with a soft fade a
+  // viewer reads as intentional, not a bug. Only the edges with a real gap
+  // are touched: at exactly 100% zoom the cover-fit axis sits flush against
+  // the canvas edge with no margin, and feathering that would crop content
+  // off a normal full-bleed photo for no reason.
+  //
+  // `left/top/right/bottom` and `canvasLeft/Top/Right/Bottom` are both
+  // already in this same local (translated+rotated) coordinate space, so
+  // whichever ones don't line up (beyond a tiny epsilon) are where the
+  // margin -- and so the feather -- belongs.
+  function drawImageEdgeFeather(left, top, right, bottom, canvasLeft, canvasTop, canvasRight, canvasBottom) {
+    const feather = Math.max(3, Math.min(10, (right - left) * 0.01));
+    const EPS = 0.5;
+    const edges = [];
+    if (top > canvasTop + EPS) edges.push({ x0: left, y0: top, x1: left, y1: top + feather, rect: [left, top, right - left, feather] });
+    if (bottom < canvasBottom - EPS) edges.push({ x0: left, y0: bottom, x1: left, y1: bottom - feather, rect: [left, bottom - feather, right - left, feather] });
+    if (left > canvasLeft + EPS) edges.push({ x0: left, y0: top, x1: left + feather, y1: top, rect: [left, top, feather, bottom - top] });
+    if (right < canvasRight - EPS) edges.push({ x0: right, y0: top, x1: right - feather, y1: top, rect: [right - feather, top, feather, bottom - top] });
+    for (const e of edges) {
+      const grad = ctx.createLinearGradient(e.x0, e.y0, e.x1, e.y1);
+      grad.addColorStop(0, 'rgba(255,255,255,1)');
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(...e.rect);
+    }
+  }
+
   function drawImageCover(img, W, H) {
     const t = state.imageTransform;
     const rotation = t.rotation || 0;
+    const rotationRad = (rotation * Math.PI) / 180;
     const scale = coverScaleFor(img, W, H) * t.zoom;
     const destW = img.naturalWidth * scale, destH = img.naturalHeight * scale;
     const level = pickDownscaleSource(img, destW, destH);
+    const left = -t.offsetXPct * destW, top = -t.offsetYPct * destH;
     ctx.save();
     ctx.translate(W / 2, H / 2);
-    if (rotation) ctx.rotate((rotation * Math.PI) / 180);
-    ctx.drawImage(level.canvas, level.innerX, level.innerY, level.innerW, level.innerH, -t.offsetXPct * destW, -t.offsetYPct * destH, destW, destH);
+    if (rotation) ctx.rotate(rotationRad);
+    ctx.drawImage(level.canvas, level.innerX, level.innerY, level.innerW, level.innerH, left, top, destW, destH);
+    // the canvas's own 4 corners, expressed in this same rotated local space
+    // (i.e. un-rotated relative to the transform just applied), so their
+    // bounding box is what "the canvas edge" means from in here
+    const cos = Math.cos(-rotationRad), sin = Math.sin(-rotationRad);
+    const corners = [[-W / 2, -H / 2], [W / 2, -H / 2], [-W / 2, H / 2], [W / 2, H / 2]]
+      .map(([x, y]) => [x * cos - y * sin, x * sin + y * cos]);
+    const canvasLeft = Math.min(...corners.map((c) => c[0]));
+    const canvasRight = Math.max(...corners.map((c) => c[0]));
+    const canvasTop = Math.min(...corners.map((c) => c[1]));
+    const canvasBottom = Math.max(...corners.map((c) => c[1]));
+    drawImageEdgeFeather(left, top, left + destW, top + destH, canvasLeft, canvasTop, canvasRight, canvasBottom);
     ctx.restore();
   }
 
