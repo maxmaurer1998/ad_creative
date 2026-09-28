@@ -608,6 +608,7 @@
         ${thumbHtml}
         <span class="library-row-name" role="button">${escapeHtml(project.name)}</span>
         <button class="library-row-btn" data-action="rename-project" data-id="${project.id}">Rename</button>
+        <button class="library-row-btn" data-action="duplicate-project" data-id="${project.id}">Duplicate</button>
         <button class="library-row-btn" data-action="delete-project" data-id="${project.id}">Delete</button>
       `;
       row.querySelector('.library-row-name').addEventListener('click', () => openProject(project.id));
@@ -641,6 +642,13 @@
       project.name = name.trim();
       await idbPut(IDB_STORE_PROJECTS, project);
       if (currentProject && currentProject.id === id) setCurrentProject({ ...currentProject, name: project.name });
+      renderLibrary();
+    } else if (action === 'duplicate-project') {
+      const project = await idbGet(IDB_STORE_PROJECTS, id);
+      if (!project) return;
+      const copy = { ...project, id: makeId(), name: `${project.name} copy`, updatedAt: Date.now() };
+      const ok = await idbPut(IDB_STORE_PROJECTS, copy);
+      if (!ok) { alert("Couldn't duplicate this project -- your browser's storage may be full."); return; }
       renderLibrary();
     } else if (action === 'delete-project') {
       const ok = confirm("Delete this saved project?\n\nThis can't be undone.");
