@@ -57,6 +57,7 @@
     <button class="tab-btn" data-panel="panel-fade">Fade</button>
     <button class="tab-btn" data-panel="panel-text">Text</button>
     <button class="tab-btn" data-panel="panel-logo">Logo</button>
+    <button class="tab-btn" data-panel="panel-stars">Stars</button>
     <button class="tab-btn" data-panel="panel-effects">Effects</button>
   </nav>
 
@@ -394,6 +395,46 @@
         <button id="removeSavedLogoBtn" class="btn btn-secondary">Remove default</button>
       </div>
       <p class="hint-text">Saving keeps this exact logo in the app permanently — new sessions load it automatically, and it survives "Clear saved session" too.</p>
+    </div>
+
+    <!-- STARS (5-STAR RATING ICON) PANEL -->
+    <div class="panel" id="panel-stars">
+      <div class="control-row">
+        <label for="starsEnabled">Show 5-star icon</label>
+        <input type="checkbox" id="starsEnabled" />
+      </div>
+      <div class="control-row">
+        <label>Position preset</label>
+        <div class="segmented segmented-2x2" id="starsPreset">
+          <button data-val="top-left">Top-left</button>
+          <button data-val="top-right">Top-right</button>
+          <button data-val="bottom-left" class="active">Bottom-left</button>
+          <button data-val="bottom-right">Bottom-right</button>
+          <button data-val="center">Center</button>
+        </div>
+      </div>
+      <div class="control-row">
+        <label for="starsSize">Size <span id="starsSizeVal">22%</span></label>
+        <input type="range" id="starsSize" min="8" max="60" value="22" />
+      </div>
+      <div class="control-row">
+        <label for="starsVPos">Vertical position</label>
+        <input type="range" id="starsVPos" min="0" max="100" value="82" />
+      </div>
+      <div class="range-scale-labels">
+        <span>Top</span>
+        <span>Bottom</span>
+      </div>
+      <div class="control-row">
+        <label for="starsColor">Colour</label>
+        <div class="color-field">
+          <input type="color" id="starsColor" value="#ffc107" />
+          <button type="button" class="eyedropper-btn" data-color-target="starsColor" title="Pick colour from image" aria-label="Pick colour from image">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 22 1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z"/></svg>
+          </button>
+        </div>
+      </div>
+      <p class="hint-text">Drag the stars directly on the canvas, or use the slider above for precise vertical placement. Guide lines appear while dragging — the stars can't be moved past the same margins as the logo and text, and align with either of them the same way.</p>
     </div>
 
     <!-- EFFECTS PANEL -->

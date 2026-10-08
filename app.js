@@ -65,6 +65,13 @@
       flipH: false,  // mirrored left/right, applied before rotation
       flipV: false,  // mirrored top/bottom, applied before rotation
     },
+    stars: {
+      enabled: false,
+      xPct: 0.18,   // center x, fraction of canvas width
+      yPct: 0.88,   // center y, fraction of canvas height
+      sizePct: 22,  // width of the whole 5-star row, as % of canvas width
+      color: '#ffc107',
+    },
     fade: {
       direction: 'bottom',
       reach: 55,
@@ -286,6 +293,7 @@
         flipH: state.logo.flipH,
         flipV: state.logo.flipV,
       },
+      stars: { ...state.stars },
       effects: { ...state.effects },
     };
   }
@@ -330,6 +338,14 @@
       state.logo.rotation = [0, 90, 180, 270].includes(rotation) ? rotation : 0; // pre-rotation recipes
       state.logo.flipH = typeof flipH === 'boolean' ? flipH : false;
       state.logo.flipV = typeof flipV === 'boolean' ? flipV : false;
+    }
+    if (recipe.stars) {
+      const { enabled, xPct, yPct, sizePct, color } = recipe.stars;
+      if (typeof enabled === 'boolean') state.stars.enabled = enabled;
+      if (typeof xPct === 'number') state.stars.xPct = xPct;
+      if (typeof yPct === 'number') state.stars.yPct = yPct;
+      if (typeof sizePct === 'number') state.stars.sizePct = sizePct;
+      if (typeof color === 'string') state.stars.color = color;
     }
   }
 
@@ -1185,6 +1201,53 @@
 
   document.getElementById('logoCustomColor').addEventListener('input', (e) => {
     state.logo.customColor = e.target.value;
+    render();
+  });
+
+  // ---------- 5-star rating icon ----------
+
+  document.getElementById('starsEnabled').addEventListener('change', (e) => {
+    state.stars.enabled = e.target.checked;
+    render();
+  });
+
+  wireSegmented('starsPreset', (val) => {
+    applyStarsCorner(val);
+    render();
+  });
+
+  const starsSize = document.getElementById('starsSize');
+  const starsSizeVal = document.getElementById('starsSizeVal');
+  starsSize.addEventListener('input', () => {
+    state.stars.sizePct = Number(starsSize.value);
+    starsSizeVal.textContent = `${state.stars.sizePct}%`;
+    const clamped = clampStarsPosition(state.stars.xPct, state.stars.yPct);
+    state.stars.xPct = clamped.xPct;
+    state.stars.yPct = clamped.yPct;
+    render();
+  });
+
+  // maps the stars' vertical position <-> a 0 (top) .. 100 (bottom) slider,
+  // across the same bounds dragging is clamped to -- same pattern as the logo's
+  function starsVPosValueToYPct(value) {
+    const { minY, maxY } = getStarsBounds();
+    if (minY > maxY) return 0.5;
+    return minY + (maxY - minY) * (value / 100);
+  }
+  function yPctToStarsVPosValue(yPct) {
+    const { minY, maxY } = getStarsBounds();
+    if (maxY <= minY) return 50;
+    return Math.round(((yPct - minY) / (maxY - minY)) * 100);
+  }
+
+  const starsVPos = document.getElementById('starsVPos');
+  starsVPos.addEventListener('input', () => {
+    state.stars.yPct = starsVPosValueToYPct(Number(starsVPos.value));
+    render();
+  });
+
+  document.getElementById('starsColor').addEventListener('input', (e) => {
+    state.stars.color = e.target.value;
     render();
   });
 
@@ -2398,9 +2461,99 @@
     ctx.restore();
   }
 
-  // ---------- drag margin guide lines (shown while dragging the logo or text) ----------
+  // ---------- 5-star rating icon ----------
 
-  let dragGuideTarget = null; // null | 'logo' | 'text' -- which object is being dragged, if any
+  // half-width/height of the star row's bounding box, as fractions of the
+  // canvas -- same role as logoHalfFracs, for margin clamping and corner
+  // presets. The row is always 5 squarish star slots side by side, so its
+  // height (in canvas px) is a fifth of its width, adjusted for the
+  // canvas's own aspect ratio the same way logoHalfFracs does.
+  function starsHalfFracs() {
+    const sizeFrac = state.stars.sizePct / 100;
+    const halfW = sizeFrac / 2;
+    const halfH = (sizeFrac / 5 / 2) * (state.canvasW / state.canvasH);
+    return { halfW, halfH };
+  }
+
+  function applyStarsCorner(corner) {
+    const margin = state.marginFrac;
+    const marginV = state.marginVFrac;
+    const { halfW, halfH } = starsHalfFracs();
+    if (corner === 'top-left') { state.stars.xPct = margin + halfW; state.stars.yPct = marginV + halfH; }
+    else if (corner === 'top-right') { state.stars.xPct = 1 - margin - halfW; state.stars.yPct = marginV + halfH; }
+    else if (corner === 'bottom-left') { state.stars.xPct = margin + halfW; state.stars.yPct = 1 - marginV - halfH; }
+    else if (corner === 'bottom-right') { state.stars.xPct = 1 - margin - halfW; state.stars.yPct = 1 - marginV - halfH; }
+    else { state.stars.xPct = 0.5; state.stars.yPct = 0.5; } // 'center'
+    const clamped = clampStarsPosition(state.stars.xPct, state.stars.yPct);
+    state.stars.xPct = clamped.xPct;
+    state.stars.yPct = clamped.yPct;
+  }
+
+  function getStarsBounds() {
+    const { halfW, halfH } = starsHalfFracs();
+    return {
+      minX: state.marginFrac + halfW,
+      maxX: 1 - state.marginFrac - halfW,
+      minY: state.marginVFrac + halfH,
+      maxY: 1 - state.marginVFrac - halfH,
+    };
+  }
+
+  function clampStarsPosition(xPct, yPct) {
+    const { minX, maxX, minY, maxY } = getStarsBounds();
+    const clampedX = minX <= maxX ? Math.min(maxX, Math.max(minX, xPct)) : 0.5;
+    const clampedY = minY <= maxY ? Math.min(maxY, Math.max(minY, yPct)) : 0.5;
+    return { xPct: clampedX, yPct: clampedY };
+  }
+
+  // the star row's bounding rect in real canvas pixels -- used for drawing,
+  // the drag hit-test, and alignment guides, same role as logoRect
+  function starsRect(W, H) {
+    if (!state.stars.enabled) return null;
+    const w = (state.stars.sizePct / 100) * W;
+    const h = w / 5;
+    const cx = state.stars.xPct * W;
+    const cy = state.stars.yPct * H;
+    return { x: cx - w / 2, y: cy - h / 2, w, h };
+  }
+
+  // traces a single 5-point star path centred at (cx, cy); innerRadius is
+  // the classic ~0.382 ratio of outerRadius for a conventional star shape
+  function traceStarPath(cx, cy, outerR) {
+    const innerR = outerR * 0.382;
+    const spikes = 5;
+    let rot = -Math.PI / 2; // first point straight up
+    const step = Math.PI / spikes;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(rot) * outerR, cy + Math.sin(rot) * outerR);
+    for (let i = 0; i < spikes; i++) {
+      rot += step;
+      ctx.lineTo(cx + Math.cos(rot) * innerR, cy + Math.sin(rot) * innerR);
+      rot += step;
+      ctx.lineTo(cx + Math.cos(rot) * outerR, cy + Math.sin(rot) * outerR);
+    }
+    ctx.closePath();
+  }
+
+  function drawStars(W, H) {
+    const r = starsRect(W, H);
+    if (!r) return;
+    const slot = r.w / 5;
+    const outerR = (slot / 2) * 0.86; // a touch of breathing room between stars
+    ctx.save();
+    ctx.fillStyle = state.stars.color;
+    for (let i = 0; i < 5; i++) {
+      const cx = r.x + slot * i + slot / 2;
+      const cy = r.y + r.h / 2;
+      traceStarPath(cx, cy, outerR);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // ---------- drag margin guide lines (shown while dragging the logo, text or stars) ----------
+
+  let dragGuideTarget = null; // null | 'logo' | 'text' | 'stars' -- which object is being dragged, if any
 
   function drawDragGuides(W, H) {
     if (!dragGuideTarget) return;
@@ -2425,19 +2578,22 @@
     ctx.restore();
   }
 
-  // ---------- smart alignment guides (shown while dragging the logo or text) ----------
+  // ---------- smart alignment guides (shown while dragging the logo, text or stars) ----------
   // beyond the always-on margin lines above, these appear only when the
-  // dragged object's edges or centre line up with the canvas centre or the
-  // *other* object's own edges/centre -- the same "does this line up with
-  // that other element" signal design tools give you, rather than a fixed
-  // reference. Whichever of the logo/text is being dragged is compared
-  // against the other one, symmetrically.
+  // dragged object's edges or centre line up with the canvas centre or
+  // either *other* object's own edges/centre -- the same "does this line up
+  // with that other element" signal design tools give you, rather than a
+  // fixed reference. Whichever of logo/text/stars is being dragged is
+  // compared against the other two, symmetrically.
   function drawSmartGuides(W, H, textBounds) {
     if (!dragGuideTarget) return;
-    const logo = logoRect(W, H);
-    const text = textBounds ? { x: textBounds.left, y: textBounds.top, w: textBounds.right - textBounds.left, h: textBounds.bottom - textBounds.top } : null;
-    const dragged = dragGuideTarget === 'logo' ? logo : text;
-    const other = dragGuideTarget === 'logo' ? text : logo;
+    const rects = {
+      logo: logoRect(W, H),
+      stars: starsRect(W, H),
+      text: textBounds ? { x: textBounds.left, y: textBounds.top, w: textBounds.right - textBounds.left, h: textBounds.bottom - textBounds.top } : null,
+    };
+    const dragged = rects[dragGuideTarget];
+    const others = Object.keys(rects).filter((k) => k !== dragGuideTarget).map((k) => rects[k]).filter(Boolean);
     if (!dragged) return;
 
     const scale = W / 1080;
@@ -2447,10 +2603,10 @@
     const marginVPx = H * state.marginVFrac;
     const xTargets = [W / 2, marginPx, W - marginPx];
     const yTargets = [H / 2, marginVPx, H - marginVPx];
-    if (other) {
+    others.forEach((other) => {
       xTargets.push(other.x, other.x + other.w, other.x + other.w / 2);
       yTargets.push(other.y, other.y + other.h, other.y + other.h / 2);
-    }
+    });
 
     const draggedXs = [dragged.x, dragged.x + dragged.w, dragged.x + dragged.w / 2];
     const draggedYs = [dragged.y, dragged.y + dragged.h, dragged.y + dragged.h / 2];
@@ -2503,6 +2659,7 @@
     drawFade(W, H, state.fade);
     const textBounds = drawTextBlock(W, H);
     drawLogo(W, H);
+    drawStars(W, H);
     drawEffects(W, H, state.effects);
     if (includeEditingAids) {
       drawDragGuides(W, H);
@@ -2517,6 +2674,7 @@
     const textBounds = paintComposite(W, H, true);
     updateLegibilityBanner(W, H, textBounds);
     logoVPos.value = yPctToLogoVPosValue(state.logo.yPct);
+    starsVPos.value = yPctToStarsVPosValue(state.stars.yPct);
     scheduleSaveRecipe();
   }
 
@@ -2775,6 +2933,7 @@
   // ---------- logo drag + text drag + photo pan/zoom (mode-exclusive on the canvas) ----------
 
   let dragging = false; // logo drag
+  let starsDragging = false;
   let textDragging = false;
   let textDragStart = null; // { clientX, clientY, vAlign, crossAlign }
   let photoDragging = false; // photo pan
@@ -2880,6 +3039,19 @@
 
     const p = clientToCanvas(e.clientX, e.clientY);
 
+    if (state.stars.enabled) {
+      const r = starsRect(state.canvasW, state.canvasH);
+      // stars are drawn on top of everything else, so they get first pick
+      // of an overlapping click, same reasoning as logo-over-text below
+      if (r && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) {
+        starsDragging = true;
+        dragGuideTarget = 'stars';
+        canvas.setPointerCapture(e.pointerId);
+        render();
+        return;
+      }
+    }
+
     if (state.logo.img) {
       const r = logoRect(state.canvasW, state.canvasH);
       // logo takes priority over text when they overlap, matching that it's
@@ -2971,6 +3143,15 @@
       return;
     }
 
+    if (starsDragging) {
+      const p = clientToCanvas(e.clientX, e.clientY);
+      const clamped = clampStarsPosition(p.x / state.canvasW, p.y / state.canvasH);
+      state.stars.xPct = clamped.xPct;
+      state.stars.yPct = clamped.yPct;
+      render();
+      return;
+    }
+
     if (textDragging && textDragStart) {
       const rect = canvas.getBoundingClientRect();
       const scaleX = state.canvasW / rect.width;
@@ -3032,6 +3213,7 @@
       return;
     }
     dragging = false;
+    starsDragging = false;
     textDragging = false;
     textDragStart = null;
     dragGuideTarget = null;
@@ -3352,11 +3534,17 @@
     document.querySelector('#logoFlip button[data-val="h"]').classList.toggle('active', !!state.logo.flipH);
     document.querySelector('#logoFlip button[data-val="v"]').classList.toggle('active', !!state.logo.flipV);
 
+    document.getElementById('starsEnabled').checked = state.stars.enabled;
+    starsSize.value = state.stars.sizePct;
+    starsSizeVal.textContent = `${state.stars.sizePct}%`;
+    document.getElementById('starsColor').value = state.stars.color;
+
     marginSlider.value = Math.round(state.marginFrac * 100);
     marginVal.textContent = `${marginSlider.value}%`;
     marginVSlider.value = Math.round(state.marginVFrac * 100);
     marginVVal.textContent = `${marginVSlider.value}%`;
     logoVPos.value = yPctToLogoVPosValue(state.logo.yPct);
+    starsVPos.value = yPctToStarsVPosValue(state.stars.yPct);
 
     imageZoom.value = Math.round(state.imageTransform.zoom * 100);
     imageZoomVal.textContent = `${imageZoom.value}%`;
