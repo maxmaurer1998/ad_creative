@@ -203,6 +203,17 @@ html, body {
 }
 .legibility-banner.hidden { display: none; }
 
+.panel-warning {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  line-height: 1.35;
+  margin: 4px 0 12px;
+}
+.panel-warning.hidden { display: none; }
+
 .sidebar {
   display: flex;
   flex-direction: column;

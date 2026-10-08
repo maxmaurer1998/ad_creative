@@ -58,6 +58,7 @@
     <button class="tab-btn" data-panel="panel-text">Text</button>
     <button class="tab-btn" data-panel="panel-logo">Logo</button>
     <button class="tab-btn" data-panel="panel-stars">Stars</button>
+    <button class="tab-btn" data-panel="panel-magnifier">Magnifier</button>
     <button class="tab-btn" data-panel="panel-effects">Effects</button>
   </nav>
 
@@ -435,6 +436,126 @@
         </div>
       </div>
       <p class="hint-text">Drag the stars directly on the canvas, or use the slider above for precise vertical placement. Guide lines appear while dragging — the stars can't be moved past the same margins as the logo and text, and align with either of them the same way.</p>
+    </div>
+
+    <!-- MAGNIFIER (PREMIUM LOUPE DETAIL CALLOUT) PANEL -->
+    <div class="panel" id="panel-magnifier">
+      <div class="control-row">
+        <label for="magnifierEnabled">Show magnifier</label>
+        <input type="checkbox" id="magnifierEnabled" />
+      </div>
+
+      <div class="control-row">
+        <label>Editing</label>
+        <div class="segmented" id="magnifierLoupeChips">
+          <button type="button" data-val="0" class="active">Loupe 1</button>
+          <button type="button" data-val="1">Loupe 2</button>
+        </div>
+      </div>
+      <div class="control-row">
+        <label for="magnifierLoupeEnabled">Use this loupe</label>
+        <input type="checkbox" id="magnifierLoupeEnabled" checked />
+      </div>
+
+      <p id="magnifierHint" class="panel-warning hidden"></p>
+
+      <div class="control-row">
+        <label>Drag on canvas</label>
+        <div class="segmented" id="magnifierDragMode">
+          <button type="button" data-val="loupe" class="active">Move loupe</button>
+          <button type="button" data-val="pan">Pan photo</button>
+        </div>
+      </div>
+      <p class="hint-text">The target marker is always draggable on the canvas. With "Move loupe" selected, dragging inside the loupe repositions it; switch to "Pan photo" to drag the detail photo around inside the loupe instead.</p>
+
+      <div class="control-row">
+        <label>Detail photo</label>
+        <label for="magnifierDetailInput" class="btn btn-secondary">Choose photo…</label>
+        <input type="file" id="magnifierDetailInput" accept="image/*" hidden />
+      </div>
+      <p class="hint-text">A real close-up photo of this exact product — never an AI-generated or stock substitute. The loupe exists to prove a detail claim, so what's inside it has to be genuine.</p>
+      <div class="control-row">
+        <label for="magnifierDetailZoom">Detail zoom <span id="magnifierDetailZoomVal">180%</span></label>
+        <input type="range" id="magnifierDetailZoom" min="100" max="400" value="180" />
+      </div>
+      <div class="control-row">
+        <label for="magnifierDetailPanX">Detail pan X <span id="magnifierDetailPanXVal">50%</span></label>
+        <input type="range" id="magnifierDetailPanX" min="0" max="100" value="50" />
+      </div>
+      <div class="control-row">
+        <label for="magnifierDetailPanY">Detail pan Y <span id="magnifierDetailPanYVal">50%</span></label>
+        <input type="range" id="magnifierDetailPanY" min="0" max="100" value="50" />
+      </div>
+      <div class="control-row">
+        <button type="button" id="magnifierResetCropBtn" class="btn btn-secondary">Reset crop</button>
+      </div>
+
+      <div class="control-row">
+        <label for="magnifierLoupeX">Loupe X <span id="magnifierLoupeXVal">80%</span></label>
+        <input type="range" id="magnifierLoupeX" min="0" max="100" value="80" />
+      </div>
+      <div class="control-row">
+        <label for="magnifierLoupeY">Loupe Y <span id="magnifierLoupeYVal">78%</span></label>
+        <input type="range" id="magnifierLoupeY" min="0" max="100" value="78" />
+      </div>
+      <div class="control-row">
+        <label for="magnifierDiameter">Loupe size <span id="magnifierDiameterVal">28%</span></label>
+        <input type="range" id="magnifierDiameter" min="15" max="45" value="28" />
+      </div>
+      <p class="hint-text">Drag the loupe directly on the canvas (with "Move loupe" selected above), or use the X/Y sliders for precise placement — stored as a percentage of the canvas, so it carries sensibly between the 4:5 and 9:16 formats. Keep it clear of the product's hero detail and the headline text.</p>
+
+      <div class="control-row">
+        <label>Loupe style</label>
+        <div class="segmented" id="magnifierStyle">
+          <button type="button" data-val="hairline" class="active">Hairline</button>
+          <button type="button" data-val="brass">Brass ring</button>
+          <button type="button" data-val="glass">Glass</button>
+        </div>
+      </div>
+      <div class="control-row">
+        <label for="magnifierShadow">Shadow</label>
+        <input type="checkbox" id="magnifierShadow" checked />
+      </div>
+
+      <div class="control-row">
+        <label>Target marker</label>
+        <div class="segmented" id="magnifierMarker">
+          <button type="button" data-val="ring" class="active">Ring</button>
+          <button type="button" data-val="dot">Dot</button>
+          <button type="button" data-val="none">None</button>
+        </div>
+      </div>
+      <p class="hint-text">The target marker shows the exact spot on the main photo that the loupe is magnifying — drag it directly on the canvas.</p>
+
+      <div class="control-row">
+        <label>Connector</label>
+        <div class="segmented" id="magnifierConnectorType">
+          <button type="button" data-val="line">Line</button>
+          <button type="button" data-val="cone" class="active">Cone</button>
+          <button type="button" data-val="none">None</button>
+        </div>
+      </div>
+      <div class="control-row">
+        <label for="magnifierLineOpacity">Line opacity <span id="magnifierLineOpacityVal">100%</span></label>
+        <input type="range" id="magnifierLineOpacity" min="0" max="100" value="100" />
+      </div>
+      <div class="control-row">
+        <label for="magnifierFillOpacity">Cone fill opacity <span id="magnifierFillOpacityVal">8%</span></label>
+        <input type="range" id="magnifierFillOpacity" min="0" max="30" value="8" />
+      </div>
+
+      <div class="control-row">
+        <label for="magnifierLabelText">Label</label>
+        <input type="text" id="magnifierLabelText" placeholder="e.g. SOLID EDGE, NOT LAYERED" />
+      </div>
+      <div class="control-row">
+        <label>Label position</label>
+        <div class="segmented" id="magnifierLabelPosition">
+          <button type="button" data-val="below" class="active">Below loupe</button>
+          <button type="button" data-val="above">Above loupe</button>
+          <button type="button" data-val="beside">Beside</button>
+        </div>
+      </div>
     </div>
 
     <!-- EFFECTS PANEL -->

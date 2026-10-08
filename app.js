@@ -43,6 +43,30 @@
 
   // ---------- state ----------
 
+  // one "loupe" (magnifier circle) -- see state.magnifier below. Positions/
+  // sizes are fractions of canvas W/H so the whole layout carries between
+  // the 4:5 and 9:16 presets without re-tuning.
+  function makeDefaultLoupe(loupeX, loupeY, targetX, targetY, enabled) {
+    return {
+      enabled,
+      detailImg: null,     // HTMLImageElement -- the close-up/macro photo shown inside the loupe
+      detailZoom: 1.8,      // 1.0-4.0, i.e. 100%-400%
+      detailPanX: 0.5,      // which fraction of the detail image sits at the loupe's centre
+      detailPanY: 0.5,
+      loupeX, loupeY,        // loupe centre
+      diameter: 0.28,        // fraction of canvas width
+      style: 'hairline',     // 'hairline' | 'brass' | 'glass'
+      shadow: true,
+      targetX, targetY,      // the point on the main photo the loupe is magnifying
+      marker: 'ring',        // 'ring' | 'dot' | 'none'
+      connectorType: 'cone', // 'line' | 'cone' | 'none'
+      lineOpacity: 1.0,
+      fillOpacity: 0.08,
+      labelText: '',
+      labelPosition: 'below', // 'below' | 'above' | 'beside'
+    };
+  }
+
   const state = {
     preset: '1080x1350',
     canvasW: 1080,
@@ -71,6 +95,16 @@
       yPct: 0.88,   // center y, fraction of canvas height
       sizePct: 22,  // width of the whole 5-star row, as % of canvas width
       color: '#ffc107',
+    },
+    magnifierEditMode: false, // true only while the Magnifier tab is open
+    magnifier: {
+      enabled: false,
+      activeLoupe: 0, // which loupe (0 or 1) the panel is currently editing
+      dragPansDetail: false, // false: dragging inside a loupe moves it; true: it pans the detail photo instead
+      loupes: [
+        makeDefaultLoupe(0.80, 0.78, 0.74, 0.46, true),
+        makeDefaultLoupe(0.20, 0.78, 0.26, 0.46, false),
+      ],
     },
     fade: {
       direction: 'bottom',
@@ -140,7 +174,7 @@
 
   const IDB_NAME = 'adcreative-db';
   const IDB_VERSION = 3;
-  const IDB_STORE_KV = 'kv';             // session state: recipe / photoBlob / logoBlob / savedLogo / imageTransform
+  const IDB_STORE_KV = 'kv';             // session state: recipe / photoBlob / logoBlob / savedLogo / imageTransform / detailBlob0 / detailBlob1
   const IDB_STORE_RECIPES = 'recipes';   // named recipe templates, keyed by name
   const IDB_STORE_FOLDERS = 'folders';   // { id, parentId, name, createdAt }
   const IDB_STORE_PROJECTS = 'projects'; // { id, folderId, name, recipe, imageTransform, photoBlob, logoBlob, thumbnailBlob, updatedAt }
@@ -294,6 +328,30 @@
         flipV: state.logo.flipV,
       },
       stars: { ...state.stars },
+      magnifier: {
+        enabled: state.magnifier.enabled,
+        activeLoupe: state.magnifier.activeLoupe,
+        dragPansDetail: state.magnifier.dragPansDetail,
+        loupes: state.magnifier.loupes.map((l) => ({
+          enabled: l.enabled,
+          detailZoom: l.detailZoom,
+          detailPanX: l.detailPanX,
+          detailPanY: l.detailPanY,
+          loupeX: l.loupeX,
+          loupeY: l.loupeY,
+          diameter: l.diameter,
+          style: l.style,
+          shadow: l.shadow,
+          targetX: l.targetX,
+          targetY: l.targetY,
+          marker: l.marker,
+          connectorType: l.connectorType,
+          lineOpacity: l.lineOpacity,
+          fillOpacity: l.fillOpacity,
+          labelText: l.labelText,
+          labelPosition: l.labelPosition,
+        })),
+      },
       effects: { ...state.effects },
     };
   }
@@ -347,6 +405,20 @@
       if (typeof sizePct === 'number') state.stars.sizePct = sizePct;
       if (typeof color === 'string') state.stars.color = color;
     }
+    if (recipe.magnifier) {
+      const m = recipe.magnifier;
+      if (typeof m.enabled === 'boolean') state.magnifier.enabled = m.enabled;
+      if (typeof m.activeLoupe === 'number') state.magnifier.activeLoupe = m.activeLoupe;
+      if (typeof m.dragPansDetail === 'boolean') state.magnifier.dragPansDetail = m.dragPansDetail;
+      const loupeFields = ['enabled', 'detailZoom', 'detailPanX', 'detailPanY', 'loupeX', 'loupeY', 'diameter', 'style', 'shadow', 'targetX', 'targetY', 'marker', 'connectorType', 'lineOpacity', 'fillOpacity', 'labelText', 'labelPosition'];
+      if (Array.isArray(m.loupes)) {
+        m.loupes.forEach((l, i) => {
+          if (!l || !state.magnifier.loupes[i]) return;
+          const target = state.magnifier.loupes[i];
+          loupeFields.forEach((k) => { if (l[k] !== undefined) target[k] = l[k]; });
+        });
+      }
+    }
   }
 
   let saveRecipeTimer = null;
@@ -377,6 +449,13 @@
   // hold a stale/unrelated blob after opening a different saved project.
   let currentPhotoBlob = null;
   let currentLogoBlob = null;
+  let currentDetailBlobs = [null, null]; // same role, one per magnifier loupe's detail image
+
+  function setCurrentDetailBlob(i, blob) {
+    currentDetailBlobs[i] = blob || null;
+    if (blob) idbSet(IDB_STORE_KV, `detailBlob${i}`, blob);
+    else idbDelete(IDB_STORE_KV, `detailBlob${i}`);
+  }
 
   // the saved-project record this session is currently editing, if any --
   // lets "Save" overwrite that same project in place instead of always
@@ -414,13 +493,15 @@
   }
 
   async function restoreSession() {
-    const [recipe, photoBlob, logoBlob, savedLogoBlob, imageTransform, savedCurrentProject] = await Promise.all([
+    const [recipe, photoBlob, logoBlob, savedLogoBlob, imageTransform, savedCurrentProject, detailBlob0, detailBlob1] = await Promise.all([
       idbGet(IDB_STORE_KV, 'recipe'),
       idbGet(IDB_STORE_KV, 'photoBlob'),
       idbGet(IDB_STORE_KV, 'logoBlob'),
       idbGet(IDB_STORE_KV, 'savedLogo'),
       idbGet(IDB_STORE_KV, 'imageTransform'),
       idbGet(IDB_STORE_KV, 'currentProject'),
+      idbGet(IDB_STORE_KV, 'detailBlob0'),
+      idbGet(IDB_STORE_KV, 'detailBlob1'),
     ]);
     if (savedCurrentProject) { currentProject = savedCurrentProject; updateSaveButtonLabel(); }
 
@@ -447,6 +528,13 @@
       if (img) { state.logo.img = img; currentLogoBlob = effectiveLogoBlob; }
     }
 
+    const detailBlobs = [detailBlob0, detailBlob1];
+    for (let i = 0; i < detailBlobs.length; i++) {
+      if (!detailBlobs[i]) continue;
+      const img = await loadImageFromBlob(detailBlobs[i]);
+      if (img) { state.magnifier.loupes[i].detailImg = img; currentDetailBlobs[i] = detailBlobs[i]; }
+    }
+
     return { hasRecipe: !!recipe };
   }
 
@@ -457,6 +545,8 @@
     await idbDelete(IDB_STORE_KV, 'recipe');
     await idbDelete(IDB_STORE_KV, 'photoBlob');
     await idbDelete(IDB_STORE_KV, 'logoBlob');
+    await idbDelete(IDB_STORE_KV, 'detailBlob0');
+    await idbDelete(IDB_STORE_KV, 'detailBlob1');
     await idbDelete(IDB_STORE_KV, 'imageTransform');
     await idbDelete(IDB_STORE_KV, 'currentProject');
     try { localStorage.removeItem(LS_KEY); } catch (e) { /* ignore */ }
@@ -719,11 +809,19 @@
       logoBlob = currentLogoBlob || (await idbGet(IDB_STORE_KV, 'savedLogo')) || null;
       if (!logoBlob) logoBlob = await imageElementToBlob(state.logo.img);
     }
+    const detailBlobs = [null, null];
+    for (let i = 0; i < 2; i++) {
+      const img = state.magnifier.loupes[i].detailImg;
+      if (!img) continue;
+      detailBlobs[i] = currentDetailBlobs[i] || await imageElementToBlob(img);
+    }
     return {
       recipe: serializeRecipe(),
       imageTransform: { ...state.imageTransform },
       photoBlob: photoBlob || null,
       logoBlob,
+      detailBlob0: detailBlobs[0],
+      detailBlob1: detailBlobs[1],
       thumbnailBlob,
       updatedAt: Date.now(),
     };
@@ -821,6 +919,18 @@
         setCurrentLogoBlob(null);
       }
 
+      for (let i = 0; i < 2; i++) {
+        const blob = project[`detailBlob${i}`];
+        if (blob) {
+          const img = await loadImageFromBlob(blob);
+          state.magnifier.loupes[i].detailImg = img;
+          setCurrentDetailBlob(i, img ? blob : null);
+        } else {
+          state.magnifier.loupes[i].detailImg = null;
+          setCurrentDetailBlob(i, null);
+        }
+      }
+
       if (project.recipe) applyRecipeToState(project.recipe);
       if (project.imageTransform && typeof project.imageTransform.zoom === 'number') {
         state.imageTransform = project.imageTransform;
@@ -911,6 +1021,10 @@
     // locked everywhere else, per the request that it "fixes/locks" when off
     state.positionEditMode = btn.dataset.panel === 'panel-position';
     stage.classList.toggle('position-edit-mode', state.positionEditMode);
+    // same idea for the magnifier's own on-canvas dragging (loupe/target/
+    // detail-pan) -- only live while its tab is open, so it can't be
+    // dragged by accident while editing something else
+    state.magnifierEditMode = btn.dataset.panel === 'panel-magnifier';
   });
 
   document.getElementById('layerTabs').addEventListener('click', (e) => {
@@ -1416,6 +1530,189 @@
     });
     setCurrentLogoBlob(file);
   });
+
+  // ---------- magnifier (premium loupe detail callout) ----------
+
+  function activeLoupeObj() { return state.magnifier.loupes[state.magnifier.activeLoupe]; }
+
+  const magnifierDetailInput = document.getElementById('magnifierDetailInput');
+  const magnifierDetailZoom = document.getElementById('magnifierDetailZoom');
+  const magnifierDetailZoomVal = document.getElementById('magnifierDetailZoomVal');
+  const magnifierDetailPanX = document.getElementById('magnifierDetailPanX');
+  const magnifierDetailPanXVal = document.getElementById('magnifierDetailPanXVal');
+  const magnifierDetailPanY = document.getElementById('magnifierDetailPanY');
+  const magnifierDetailPanYVal = document.getElementById('magnifierDetailPanYVal');
+  const magnifierLoupeX = document.getElementById('magnifierLoupeX');
+  const magnifierLoupeXVal = document.getElementById('magnifierLoupeXVal');
+  const magnifierLoupeY = document.getElementById('magnifierLoupeY');
+  const magnifierLoupeYVal = document.getElementById('magnifierLoupeYVal');
+  const magnifierDiameter = document.getElementById('magnifierDiameter');
+  const magnifierDiameterVal = document.getElementById('magnifierDiameterVal');
+  const magnifierLineOpacity = document.getElementById('magnifierLineOpacity');
+  const magnifierLineOpacityVal = document.getElementById('magnifierLineOpacityVal');
+  const magnifierFillOpacity = document.getElementById('magnifierFillOpacity');
+  const magnifierFillOpacityVal = document.getElementById('magnifierFillOpacityVal');
+  const magnifierLabelText = document.getElementById('magnifierLabelText');
+  const magnifierLoupeEnabled = document.getElementById('magnifierLoupeEnabled');
+
+  // refreshes every control in the Magnifier panel to reflect whichever
+  // loupe is currently selected (the "Loupe 1"/"Loupe 2" chips) -- called on
+  // chip switch and from syncAllControlsFromState (session/project restore)
+  function syncMagnifierPanelFromState() {
+    const loupe = activeLoupeObj();
+    document.getElementById('magnifierEnabled').checked = state.magnifier.enabled;
+    setSegmentedActive('magnifierLoupeChips', String(state.magnifier.activeLoupe));
+    magnifierLoupeEnabled.checked = loupe.enabled;
+    setSegmentedActive('magnifierDragMode', state.magnifier.dragPansDetail ? 'pan' : 'loupe');
+    magnifierDetailZoom.value = Math.round(loupe.detailZoom * 100);
+    magnifierDetailZoomVal.textContent = `${magnifierDetailZoom.value}%`;
+    magnifierDetailPanX.value = Math.round(loupe.detailPanX * 100);
+    magnifierDetailPanXVal.textContent = `${magnifierDetailPanX.value}%`;
+    magnifierDetailPanY.value = Math.round(loupe.detailPanY * 100);
+    magnifierDetailPanYVal.textContent = `${magnifierDetailPanY.value}%`;
+    magnifierLoupeX.value = Math.round(loupe.loupeX * 100);
+    magnifierLoupeXVal.textContent = `${magnifierLoupeX.value}%`;
+    magnifierLoupeY.value = Math.round(loupe.loupeY * 100);
+    magnifierLoupeYVal.textContent = `${magnifierLoupeY.value}%`;
+    magnifierDiameter.value = Math.round(loupe.diameter * 100);
+    magnifierDiameterVal.textContent = `${magnifierDiameter.value}%`;
+    setSegmentedActive('magnifierStyle', loupe.style);
+    document.getElementById('magnifierShadow').checked = loupe.shadow;
+    setSegmentedActive('magnifierMarker', loupe.marker);
+    setSegmentedActive('magnifierConnectorType', loupe.connectorType);
+    magnifierLineOpacity.value = Math.round(loupe.lineOpacity * 100);
+    magnifierLineOpacityVal.textContent = `${magnifierLineOpacity.value}%`;
+    magnifierFillOpacity.value = Math.round(loupe.fillOpacity * 100);
+    magnifierFillOpacityVal.textContent = `${magnifierFillOpacity.value}%`;
+    magnifierLabelText.value = loupe.labelText;
+    setSegmentedActive('magnifierLabelPosition', loupe.labelPosition);
+  }
+
+  document.getElementById('magnifierEnabled').addEventListener('change', (e) => {
+    state.magnifier.enabled = e.target.checked;
+    render();
+  });
+
+  wireSegmented('magnifierLoupeChips', (val) => {
+    state.magnifier.activeLoupe = Number(val);
+    syncMagnifierPanelFromState();
+    render();
+  });
+
+  magnifierLoupeEnabled.addEventListener('change', (e) => {
+    activeLoupeObj().enabled = e.target.checked;
+    render();
+  });
+
+  wireSegmented('magnifierDragMode', (val) => {
+    state.magnifier.dragPansDetail = val === 'pan';
+  });
+
+  magnifierDetailInput.addEventListener('change', () => {
+    const file = magnifierDetailInput.files[0];
+    if (!file) return;
+    const idx = state.magnifier.activeLoupe;
+    loadImageFile(file, (img) => {
+      state.magnifier.loupes[idx].detailImg = img;
+      state.magnifier.loupes[idx].detailZoom = 1.8;
+      state.magnifier.loupes[idx].detailPanX = 0.5;
+      state.magnifier.loupes[idx].detailPanY = 0.5;
+      syncMagnifierPanelFromState();
+      render();
+    });
+    setCurrentDetailBlob(idx, file);
+  });
+
+  magnifierDetailZoom.addEventListener('input', () => {
+    const loupe = activeLoupeObj();
+    loupe.detailZoom = Number(magnifierDetailZoom.value) / 100;
+    magnifierDetailZoomVal.textContent = `${magnifierDetailZoom.value}%`;
+    const clamped = clampDetailPan(loupe, loupe.detailPanX, loupe.detailPanY);
+    loupe.detailPanX = clamped.x;
+    loupe.detailPanY = clamped.y;
+    magnifierDetailPanX.value = Math.round(loupe.detailPanX * 100);
+    magnifierDetailPanXVal.textContent = `${magnifierDetailPanX.value}%`;
+    magnifierDetailPanY.value = Math.round(loupe.detailPanY * 100);
+    magnifierDetailPanYVal.textContent = `${magnifierDetailPanY.value}%`;
+    render();
+  });
+
+  magnifierDetailPanX.addEventListener('input', () => {
+    const loupe = activeLoupeObj();
+    const clamped = clampDetailPan(loupe, Number(magnifierDetailPanX.value) / 100, loupe.detailPanY);
+    loupe.detailPanX = clamped.x;
+    magnifierDetailPanXVal.textContent = `${Math.round(loupe.detailPanX * 100)}%`;
+    render();
+  });
+  magnifierDetailPanY.addEventListener('input', () => {
+    const loupe = activeLoupeObj();
+    const clamped = clampDetailPan(loupe, loupe.detailPanX, Number(magnifierDetailPanY.value) / 100);
+    loupe.detailPanY = clamped.y;
+    magnifierDetailPanYVal.textContent = `${Math.round(loupe.detailPanY * 100)}%`;
+    render();
+  });
+
+  document.getElementById('magnifierResetCropBtn').addEventListener('click', () => {
+    const loupe = activeLoupeObj();
+    loupe.detailZoom = 1.8;
+    loupe.detailPanX = 0.5;
+    loupe.detailPanY = 0.5;
+    syncMagnifierPanelFromState();
+    render();
+  });
+
+  magnifierLoupeX.addEventListener('input', () => {
+    const loupe = activeLoupeObj();
+    const clamped = clampLoupePosition(loupe, Number(magnifierLoupeX.value) / 100, loupe.loupeY);
+    loupe.loupeX = clamped.x;
+    magnifierLoupeXVal.textContent = `${Math.round(loupe.loupeX * 100)}%`;
+    render();
+  });
+  magnifierLoupeY.addEventListener('input', () => {
+    const loupe = activeLoupeObj();
+    const clamped = clampLoupePosition(loupe, loupe.loupeX, Number(magnifierLoupeY.value) / 100);
+    loupe.loupeY = clamped.y;
+    magnifierLoupeYVal.textContent = `${Math.round(loupe.loupeY * 100)}%`;
+    render();
+  });
+
+  // resizing can push the loupe outside the 4%-edge margin at its current
+  // position -- reclamp afterward, same pattern as the logo's size slider
+  magnifierDiameter.addEventListener('input', () => {
+    const loupe = activeLoupeObj();
+    loupe.diameter = Number(magnifierDiameter.value) / 100;
+    magnifierDiameterVal.textContent = `${magnifierDiameter.value}%`;
+    const clamped = clampLoupePosition(loupe, loupe.loupeX, loupe.loupeY);
+    loupe.loupeX = clamped.x;
+    loupe.loupeY = clamped.y;
+    magnifierLoupeX.value = Math.round(loupe.loupeX * 100);
+    magnifierLoupeXVal.textContent = `${magnifierLoupeX.value}%`;
+    magnifierLoupeY.value = Math.round(loupe.loupeY * 100);
+    magnifierLoupeYVal.textContent = `${magnifierLoupeY.value}%`;
+    render();
+  });
+
+  wireSegmented('magnifierStyle', (val) => { activeLoupeObj().style = val; render(); });
+  document.getElementById('magnifierShadow').addEventListener('change', (e) => { activeLoupeObj().shadow = e.target.checked; render(); });
+  wireSegmented('magnifierMarker', (val) => { activeLoupeObj().marker = val; render(); });
+  wireSegmented('magnifierConnectorType', (val) => { activeLoupeObj().connectorType = val; render(); });
+
+  magnifierLineOpacity.addEventListener('input', () => {
+    activeLoupeObj().lineOpacity = Number(magnifierLineOpacity.value) / 100;
+    magnifierLineOpacityVal.textContent = `${magnifierLineOpacity.value}%`;
+    render();
+  });
+  magnifierFillOpacity.addEventListener('input', () => {
+    activeLoupeObj().fillOpacity = Number(magnifierFillOpacity.value) / 100;
+    magnifierFillOpacityVal.textContent = `${magnifierFillOpacity.value}%`;
+    render();
+  });
+
+  magnifierLabelText.addEventListener('input', () => {
+    activeLoupeObj().labelText = magnifierLabelText.value;
+    render();
+  });
+  wireSegmented('magnifierLabelPosition', (val) => { activeLoupeObj().labelPosition = val; render(); });
 
   // ---------- fade drawing ----------
 
@@ -2551,6 +2848,380 @@
     ctx.restore();
   }
 
+  // ---------- magnifier (premium "loupe" detail callout) ----------
+
+  const MAGNIFIER_INK = '#2B1E16';
+  const MAGNIFIER_BRASS = '#966C26';
+
+  // circle centre/radius and target point, in real canvas px for the given
+  // resolution -- the one place this geometry is computed, shared by
+  // drawing, hit-testing and dragging so they can never disagree
+  function loupeCircle(loupe, W, H) {
+    return { cx: loupe.loupeX * W, cy: loupe.loupeY * H, r: (loupe.diameter * W) / 2 };
+  }
+
+  // keeps at least 4% of canvas width between the loupe and any canvas edge
+  // (a fixed rule, independent of the text/logo margin sliders -- the
+  // magnifier is a separate, premium-detail element with its own spacing)
+  function clampLoupePosition(loupe, x, y) {
+    const edgeFrac = 0.04;
+    const halfW = loupe.diameter / 2;
+    const halfH = (loupe.diameter * state.canvasW) / 2 / state.canvasH;
+    const minX = edgeFrac + halfW, maxX = 1 - edgeFrac - halfW;
+    const minY = edgeFrac + halfH, maxY = 1 - edgeFrac - halfH;
+    return {
+      x: minX <= maxX ? Math.min(maxX, Math.max(minX, x)) : 0.5,
+      y: minY <= maxY ? Math.min(maxY, Math.max(minY, y)) : 0.5,
+    };
+  }
+
+  // clamps detailPanX/Y so the detail image, at its current zoom, always
+  // fully covers the loupe circle -- expressed as a ratio independent of any
+  // particular canvas resolution (both the circle's diameter and the image's
+  // on-screen size scale together, so the bounds this implies are the same
+  // at preview or export resolution)
+  function clampDetailPan(loupe, panX, panY) {
+    const img = loupe.detailImg;
+    if (!img) return { x: 0.5, y: 0.5 };
+    const coverScale = Math.max(1 / img.naturalWidth, 1 / img.naturalHeight); // for a unit (1px) diameter
+    const scale = coverScale * loupe.detailZoom;
+    const destW = img.naturalWidth * scale, destH = img.naturalHeight * scale;
+    const r = 0.5;
+    const minX = r / destW, maxX = 1 - r / destW;
+    const minY = r / destH, maxY = 1 - r / destH;
+    return {
+      x: minX <= maxX ? Math.min(maxX, Math.max(minX, panX)) : 0.5,
+      y: minY <= maxY ? Math.min(maxY, Math.max(minY, panY)) : 0.5,
+    };
+  }
+
+  // the detail image's actual draw rect for a loupe circle (cx, cy, r) --
+  // always clamped, so it's never possible to compute (or accidentally
+  // persist) a rect that leaves empty space inside the circle
+  function detailImageDrawRect(loupe, cx, cy, r) {
+    const img = loupe.detailImg;
+    if (!img) return null;
+    const d = r * 2;
+    const coverScale = Math.max(d / img.naturalWidth, d / img.naturalHeight);
+    const scale = coverScale * loupe.detailZoom;
+    const destW = img.naturalWidth * scale, destH = img.naturalHeight * scale;
+    const pan = clampDetailPan(loupe, loupe.detailPanX, loupe.detailPanY);
+    return { img, destX: cx - pan.x * destW, destY: cy - pan.y * destH, destW, destH };
+  }
+
+  // P -> loupe connector geometry (see the spec's section 3): the nearest
+  // point on the circle E, and -- when the target is far enough away not to
+  // overlap it -- the two tangent points T1/T2 the cone connector runs to.
+  // Hidden (no connector at all) when the target sits inside or too close to
+  // the loupe, since a line/cone from here would be meaningless.
+  function computeConnectorGeometry(loupe, W, H) {
+    const scale = W / 1080;
+    const { cx, cy, r } = loupeCircle(loupe, W, H);
+    const px = loupe.targetX * W, py = loupe.targetY * H;
+    const dx = px - cx, dy = py - cy;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d <= r * 1.15) return { hidden: true, cx, cy, r, px, py, d, scale };
+    const phi = Math.atan2(dy, dx);
+    const E = { x: cx + r * Math.cos(phi), y: cy + r * Math.sin(phi) };
+    const beta = Math.acos(Math.min(1, r / d));
+    const T1 = { x: cx + r * Math.cos(phi + beta), y: cy + r * Math.sin(phi + beta) };
+    const T2 = { x: cx + r * Math.cos(phi - beta), y: cy + r * Math.sin(phi - beta) };
+    return { hidden: false, cx, cy, r, px, py, phi, beta, E, T1, T2, d, scale };
+  }
+
+  function drawConnector(loupe, geom) {
+    if (loupe.connectorType === 'none' || geom.hidden) return;
+    const { cx, cy, r, px, py, phi, beta, E, T1, T2, scale } = geom;
+    // the connector line stops at the *edge* of the target marker rather
+    // than its centre, so it doesn't visually run through the marker
+    const markerR = loupe.marker === 'none' ? 0 : loupe.marker === 'dot' ? 4 * scale : 8 * scale;
+    const stoppedFrom = (tx, ty) => {
+      const ddx = tx - px, ddy = ty - py;
+      const dd = Math.sqrt(ddx * ddx + ddy * ddy) || 1;
+      return { x: px + (markerR * ddx) / dd, y: py + (markerR * ddy) / dd };
+    };
+
+    if (loupe.connectorType === 'cone') {
+      // faint wedge, fading from fully transparent at the target to the set
+      // opacity right at the loupe's edge -- "a beam of focus, not a shape"
+      const grad = ctx.createLinearGradient(px, py, E.x, E.y);
+      grad.addColorStop(0, 'rgba(43,30,22,0)');
+      grad.addColorStop(1, `rgba(43,30,22,${loupe.fillOpacity})`);
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.lineTo(T1.x, T1.y);
+      ctx.arc(cx, cy, r, phi + beta, phi - beta, true); // the near-side (minor) arc between the two tangent points
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+      ctx.restore();
+
+      ctx.save();
+      ctx.strokeStyle = `rgba(43,30,22,${loupe.lineOpacity})`;
+      ctx.lineWidth = 1.75 * scale;
+      [T1, T2].forEach((T) => {
+        const s = stoppedFrom(T.x, T.y);
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y);
+        ctx.lineTo(T.x, T.y);
+        ctx.stroke();
+      });
+      ctx.restore();
+    } else if (loupe.connectorType === 'line') {
+      const s = stoppedFrom(E.x, E.y);
+      ctx.save();
+      ctx.strokeStyle = `rgba(43,30,22,${loupe.lineOpacity})`;
+      ctx.lineWidth = 1.75 * scale;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(E.x, E.y);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // a filled circle whose only visible effect (once the opaque lens is drawn
+  // on top of it) is the soft shadow spilling out beyond its own edge --
+  // "lifted, not stuck on"
+  function drawLoupeShadow(cx, cy, r, scale) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(43,30,22,0.18)';
+    ctx.shadowBlur = r * 2 * 0.06;
+    ctx.shadowOffsetY = r * 2 * 0.015;
+    ctx.fillStyle = 'rgba(0,0,0,1)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawLoupeVignette(cx, cy, r) {
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.12)');
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.fillStyle = grad;
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+    ctx.restore();
+  }
+
+  function drawLoupeRings(cx, cy, r, style, scale) {
+    ctx.save();
+    if (style === 'brass') {
+      ctx.strokeStyle = MAGNIFIER_BRASS;
+      ctx.lineWidth = 4 * scale;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = 'rgba(43,30,22,0.55)';
+      ctx.lineWidth = 1 * scale;
+      ctx.beginPath(); ctx.arc(cx, cy, r + 4 * scale, 0, Math.PI * 2); ctx.stroke();
+    } else {
+      // 'hairline' and 'glass' share the same ring construction
+      ctx.strokeStyle = MAGNIFIER_INK;
+      ctx.lineWidth = 3 * scale;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+      ctx.lineWidth = 1 * scale;
+      ctx.beginPath(); ctx.arc(cx, cy, r - 6 * scale, 0, Math.PI * 2); ctx.stroke();
+    }
+    if (style === 'glass') {
+      // a very subtle specular highlight, top-left, ~90° long -- understated
+      // on purpose; if it's easy to spot at a glance, it's too strong
+      ctx.save();
+      ctx.filter = `blur(${3 * scale}px)`;
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+      ctx.lineWidth = 10 * scale;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r - 8 * scale, Math.PI, Math.PI * 1.5);
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  function drawTargetMarker(px, py, marker, scale) {
+    if (marker === 'none') return;
+    ctx.save();
+    if (marker === 'dot') {
+      ctx.fillStyle = MAGNIFIER_INK;
+      ctx.beginPath(); ctx.arc(px, py, 4 * scale, 0, Math.PI * 2); ctx.fill();
+    } else {
+      const radius = 8 * scale;
+      // soft white halo first, so the ring stays visible against dark photo content
+      ctx.save();
+      ctx.filter = `blur(${1 * scale}px)`;
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 3 * scale;
+      ctx.beginPath(); ctx.arc(px, py, radius, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+      ctx.strokeStyle = MAGNIFIER_INK;
+      ctx.lineWidth = 2.5 * scale;
+      ctx.beginPath(); ctx.arc(px, py, radius, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // manual letter-spacing (tracking) for the label -- not every browser
+  // supports canvas's own letterSpacing property reliably, so each character
+  // is placed by hand, the same technique works everywhere
+  function measureSpacedWidth(text, letterSpacing) {
+    let w = 0;
+    for (const ch of text) w += ctx.measureText(ch).width + letterSpacing;
+    if (text.length) w -= letterSpacing;
+    return w;
+  }
+  function fillSpacedText(text, x, y, letterSpacing, align) {
+    const totalW = measureSpacedWidth(text, letterSpacing);
+    let cursor = align === 'center' ? x - totalW / 2 : align === 'right' ? x - totalW : x;
+    const prevAlign = ctx.textAlign;
+    ctx.textAlign = 'left';
+    for (const ch of text) {
+      ctx.fillText(ch, cursor, y);
+      cursor += ctx.measureText(ch).width + letterSpacing;
+    }
+    ctx.textAlign = prevAlign;
+  }
+
+  // draws the label (if any) and returns its bounding box, used for the 9:16
+  // safe-zone check -- a label tucked right under the loupe can itself drift
+  // into the forbidden Stories/Reels UI band even when the circle doesn't
+  function drawLoupeLabel(loupe, cx, cy, r, W) {
+    const text = (loupe.labelText || '').trim();
+    if (!text) return null;
+    const fontSize = 0.024 * W; // 26px at 1080
+    const scale = W / 1080;
+    const gap = 18 * scale;
+    const letterSpacing = fontSize * 0.12;
+    const upper = text.toUpperCase();
+    ctx.save();
+    ctx.font = `700 ${fontSize}px system-ui, -apple-system, sans-serif`;
+    ctx.fillStyle = MAGNIFIER_INK;
+    ctx.textBaseline = 'alphabetic';
+    let bounds;
+    if (loupe.labelPosition === 'above') {
+      const y = cy - r - gap;
+      fillSpacedText(upper, cx, y, letterSpacing, 'center');
+      const w = measureSpacedWidth(upper, letterSpacing);
+      bounds = { left: cx - w / 2, right: cx + w / 2, top: y - fontSize, bottom: y + fontSize * 0.2 };
+    } else if (loupe.labelPosition === 'beside') {
+      // auto side: whichever side has more room, so the label doesn't run off-canvas
+      const onRight = cx <= W / 2;
+      const x = onRight ? cx + r + gap : cx - r - gap;
+      const y = cy + fontSize * 0.35;
+      fillSpacedText(upper, x, y, letterSpacing, onRight ? 'left' : 'right');
+      const w = measureSpacedWidth(upper, letterSpacing);
+      bounds = onRight
+        ? { left: x, right: x + w, top: y - fontSize, bottom: y + fontSize * 0.2 }
+        : { left: x - w, right: x, top: y - fontSize, bottom: y + fontSize * 0.2 };
+    } else { // 'below' (default)
+      const y = cy + r + gap + fontSize * 0.8;
+      fillSpacedText(upper, cx, y, letterSpacing, 'center');
+      const w = measureSpacedWidth(upper, letterSpacing);
+      bounds = { left: cx - w / 2, right: cx + w / 2, top: y - fontSize, bottom: y + fontSize * 0.2 };
+    }
+    ctx.restore();
+    return bounds;
+  }
+
+  // draw order per the spec: cone fill -> cone/line strokes -> loupe shadow
+  // -> loupe image -> vignette -> rings -> target marker -> label. The loupe
+  // itself sits on top of the connector, so the lines read as disappearing
+  // behind the lens rather than floating over it.
+  function drawOneLoupe(loupe, W, H) {
+    if (!loupe.enabled) return null;
+    const scale = W / 1080;
+    const geom = computeConnectorGeometry(loupe, W, H);
+    drawConnector(loupe, geom);
+
+    const { cx, cy, r } = geom;
+    if (loupe.shadow) drawLoupeShadow(cx, cy, r, scale);
+
+    const rect = detailImageDrawRect(loupe, cx, cy, r);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.clip();
+    if (rect) {
+      const level = pickDownscaleSource(rect.img, rect.destW, rect.destH);
+      ctx.drawImage(level.canvas, level.innerX, level.innerY, level.innerW, level.innerH, rect.destX, rect.destY, rect.destW, rect.destH);
+    } else {
+      // no detail photo uploaded yet -- a neutral placeholder so the loupe
+      // still reads as a lens rather than an empty hole while editing
+      ctx.fillStyle = '#ddd4c8';
+      ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+    }
+    ctx.restore();
+
+    drawLoupeVignette(cx, cy, r);
+    drawLoupeRings(cx, cy, r, loupe.style, scale);
+    drawTargetMarker(geom.px, geom.py, loupe.marker, scale);
+    const labelBounds = drawLoupeLabel(loupe, cx, cy, r, W);
+    return { geom, labelBounds };
+  }
+
+  // draws every enabled loupe and returns per-loupe geometry/label bounds,
+  // used afterwards for the 9:16 safe-zone warning and the "move the loupe"
+  // hint -- both editing-only, so they're computed here rather than inside
+  // the draw itself, which also runs (without them) for export
+  function drawMagnifier(W, H) {
+    if (!state.magnifier.enabled) return [];
+    return state.magnifier.loupes.map((loupe, index) => {
+      const result = drawOneLoupe(loupe, W, H);
+      return result && { loupe, index, ...result };
+    }).filter(Boolean);
+  }
+
+  // 9:16 only: Stories/Reels UI covers the top 14% and bottom 35% of the
+  // frame, so a loupe (or its label) drifting in there is a real layout bug,
+  // not just a style nitpick -- flagged with a red outline while editing
+  function loupeInSafeZoneConflict(result, H) {
+    if (state.preset !== '1080x1920') return false;
+    const topBand = H * 0.14, bottomBand = H * 0.65;
+    let top = result.geom.cy - result.geom.r, bottom = result.geom.cy + result.geom.r;
+    if (result.labelBounds) {
+      top = Math.min(top, result.labelBounds.top);
+      bottom = Math.max(bottom, result.labelBounds.bottom);
+    }
+    return top < topBand || bottom > bottomBand;
+  }
+
+  // 2.6: the loupe must never sit on top of the headline text block --
+  // approximated as circle-vs-rect overlap (closest-point test), checked
+  // against the loupe circle and, separately, its label's own bounds
+  function loupeOverlapsText(result, textBounds) {
+    if (!textBounds) return false;
+    const circleHitsRect = (cx, cy, r) => {
+      const closestX = Math.min(Math.max(cx, textBounds.left), textBounds.right);
+      const closestY = Math.min(Math.max(cy, textBounds.top), textBounds.bottom);
+      const dx = cx - closestX, dy = cy - closestY;
+      return dx * dx + dy * dy < r * r;
+    };
+    if (circleHitsRect(result.geom.cx, result.geom.cy, result.geom.r)) return true;
+    if (result.labelBounds) {
+      const lb = result.labelBounds;
+      return lb.left < textBounds.right && lb.right > textBounds.left && lb.top < textBounds.bottom && lb.bottom > textBounds.top;
+    }
+    return false;
+  }
+
+  function drawMagnifierEditingAids(W, H, magnifierResults, textBounds) {
+    const scale = W / 1080;
+    magnifierResults.forEach((result) => {
+      if (!loupeInSafeZoneConflict(result, H) && !loupeOverlapsText(result, textBounds)) return;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(220,38,38,0.9)';
+      ctx.lineWidth = Math.max(2, 2 * scale);
+      ctx.setLineDash([W * 0.01, W * 0.008]);
+      ctx.beginPath();
+      ctx.arc(result.geom.cx, result.geom.cy, result.geom.r + 4 * scale, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
+
   // ---------- drag margin guide lines (shown while dragging the logo, text or stars) ----------
 
   let dragGuideTarget = null; // null | 'logo' | 'text' | 'stars' -- which object is being dragged, if any
@@ -2640,6 +3311,9 @@
   // canvas `ctx` currently points to, at the given resolution. Editing aids
   // (logo drag guides, the safe-zone guide) are in-app-only and are never
   // baked into an export, regardless of whether they're toggled on.
+  let lastMagnifierResults = []; // set by paintComposite, read by render() for the safe-zone/hint UI below
+  let lastTextBounds = null; // set by paintComposite, read for the loupe/headline overlap warning
+
   function paintComposite(W, H, includeEditingAids) {
     ctx.clearRect(0, 0, W, H);
 
@@ -2660,12 +3334,16 @@
     const textBounds = drawTextBlock(W, H);
     drawLogo(W, H);
     drawStars(W, H);
+    const magnifierResults = drawMagnifier(W, H);
     drawEffects(W, H, state.effects);
     if (includeEditingAids) {
       drawDragGuides(W, H);
       drawSmartGuides(W, H, textBounds);
       drawSafeZone(W, H);
+      drawMagnifierEditingAids(W, H, magnifierResults, textBounds);
     }
+    lastMagnifierResults = magnifierResults;
+    lastTextBounds = textBounds;
     return textBounds;
   }
 
@@ -2673,8 +3351,22 @@
     const W = state.canvasW, H = state.canvasH;
     const textBounds = paintComposite(W, H, true);
     updateLegibilityBanner(W, H, textBounds);
+    updateMagnifierHints(W, H);
     logoVPos.value = yPctToLogoVPosValue(state.logo.yPct);
     starsVPos.value = yPctToStarsVPosValue(state.stars.yPct);
+    // keeps the X/Y sliders live while dragging the loupe/target/detail-pan
+    // directly on canvas, same reasoning as the logo/stars vertical sliders above
+    if (magnifierDragMode) {
+      const loupe = activeLoupeObj();
+      magnifierLoupeX.value = Math.round(loupe.loupeX * 100);
+      magnifierLoupeXVal.textContent = `${magnifierLoupeX.value}%`;
+      magnifierLoupeY.value = Math.round(loupe.loupeY * 100);
+      magnifierLoupeYVal.textContent = `${magnifierLoupeY.value}%`;
+      magnifierDetailPanX.value = Math.round(loupe.detailPanX * 100);
+      magnifierDetailPanXVal.textContent = `${magnifierDetailPanX.value}%`;
+      magnifierDetailPanY.value = Math.round(loupe.detailPanY * 100);
+      magnifierDetailPanYVal.textContent = `${magnifierDetailPanY.value}%`;
+    }
     scheduleSaveRecipe();
   }
 
@@ -2692,7 +3384,11 @@
   // the pyramid only costs anything once per photo, not on every drag/zoom
   // frame.
   const EDGE_PAD = 4;
-  let downscalePyramidCache = { img: null, levels: null };
+  // keyed by image identity (a Map, not a single slot) -- the magnifier can
+  // have the main photo plus up to two detail images in play at once, and a
+  // single-slot cache would thrash (rebuild on every draw) switching between
+  // them every frame instead of paying the cost once per image
+  const downscalePyramidCache = new Map();
   function padEdges(srcCanvasOrImg, w, h) {
     // draws srcCanvasOrImg's own edge pixels into a new canvas EDGE_PAD px
     // larger on all sides, extended/clamped outward -- top/bottom/left/right
@@ -2713,7 +3409,7 @@
     return padded;
   }
   function getDownscalePyramid(img) {
-    if (downscalePyramidCache.img === img) return downscalePyramidCache.levels;
+    if (downscalePyramidCache.has(img)) return downscalePyramidCache.get(img);
     // level 0: the full-resolution image, padded -- innerX/Y/W/H is always
     // the sub-rectangle of `canvas` that's the actual (unpadded) photo
     const w0 = img.naturalWidth, h0 = img.naturalHeight;
@@ -2736,7 +3432,7 @@
       levels.push(next);
       prev = next;
     }
-    downscalePyramidCache = { img, levels };
+    downscalePyramidCache.set(img, levels);
     return levels;
   }
 
@@ -2876,6 +3572,29 @@
     }
   }
 
+  // warns, for whichever loupe the panel is currently editing, when the
+  // connector is hidden (target too close to/inside the loupe) or the loupe
+  // drifts into the 9:16 safe zone -- the on-canvas red outline (see
+  // drawMagnifierEditingAids) shows *where*, this explains *why*
+  function updateMagnifierHints(W, H) {
+    const hintEl = document.getElementById('magnifierHint');
+    if (!hintEl) return;
+    const idx = state.magnifier.activeLoupe;
+    const loupe = state.magnifier.loupes[idx];
+    if (!state.magnifier.enabled || !loupe || !loupe.enabled) { hintEl.classList.add('hidden'); return; }
+    const result = lastMagnifierResults.find((r) => r.index === idx);
+    const messages = [];
+    if (result && result.geom.hidden) messages.push('The target is too close to the loupe — move it away to show the connector.');
+    if (result && loupeInSafeZoneConflict(result, H)) messages.push('This loupe sits in the Stories/Reels safe zone (top 14% or bottom 35% of the frame) — it may be covered by platform UI.');
+    if (result && loupeOverlapsText(result, lastTextBounds)) messages.push('This loupe overlaps the headline text — move it clear of the text block.');
+    if (messages.length) {
+      hintEl.textContent = messages.join(' ');
+      hintEl.classList.remove('hidden');
+    } else {
+      hintEl.classList.add('hidden');
+    }
+  }
+
   // ---------- canvas resize to fit stage ----------
 
   // "editing view" zoom (desktop only) -- purely how large the canvas is
@@ -2936,6 +3655,8 @@
   let starsDragging = false;
   let textDragging = false;
   let textDragStart = null; // { clientX, clientY, vAlign, crossAlign }
+  let magnifierDragMode = null; // null | 'target' | 'loupe' | 'pan' -- only while state.magnifierEditMode
+  let magnifierDragStart = null; // { clientX, clientY, ...whatever magnifierDragMode needs to resume from }
   let photoDragging = false; // photo pan
   let panStart = null; // { clientX, clientY, offsetXPct, offsetYPct }
   const activePointers = new Map(); // pointerId -> {x, y}, for pinch-zoom
@@ -3037,6 +3758,40 @@
       return;
     }
 
+    // mode-exclusive, same idea as positionEditMode above -- while this tab
+    // is open, canvas drags only ever touch the loupe being edited, never
+    // stars/logo/text underneath it
+    if (state.magnifierEditMode) {
+      if (!state.magnifier.enabled) return;
+      const idx = state.magnifier.activeLoupe;
+      const loupe = state.magnifier.loupes[idx];
+      if (!loupe || !loupe.enabled) return;
+      const mp = clientToCanvas(e.clientX, e.clientY);
+      const scale = state.canvasW / 1080;
+      const { cx, cy, r } = loupeCircle(loupe, state.canvasW, state.canvasH);
+      const px = loupe.targetX * state.canvasW, py = loupe.targetY * state.canvasH;
+      const targetHitR = 16 * scale; // generous hit area around the (small) marker
+      const dtx = mp.x - px, dty = mp.y - py;
+      if (Math.sqrt(dtx * dtx + dty * dty) <= targetHitR) {
+        magnifierDragMode = 'target';
+        magnifierDragStart = { clientX: e.clientX, clientY: e.clientY, targetX: loupe.targetX, targetY: loupe.targetY };
+        canvas.setPointerCapture(e.pointerId);
+        return;
+      }
+      const dlx = mp.x - cx, dly = mp.y - cy;
+      if (Math.sqrt(dlx * dlx + dly * dly) <= r) {
+        if (state.magnifier.dragPansDetail) {
+          magnifierDragMode = 'pan';
+          magnifierDragStart = { clientX: e.clientX, clientY: e.clientY, panX: loupe.detailPanX, panY: loupe.detailPanY };
+        } else {
+          magnifierDragMode = 'loupe';
+          magnifierDragStart = { clientX: e.clientX, clientY: e.clientY, loupeX: loupe.loupeX, loupeY: loupe.loupeY };
+        }
+        canvas.setPointerCapture(e.pointerId);
+      }
+      return;
+    }
+
     const p = clientToCanvas(e.clientX, e.clientY);
 
     if (state.stars.enabled) {
@@ -3133,6 +3888,39 @@
       return;
     }
 
+    if (magnifierDragMode) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = state.canvasW / rect.width;
+      const scaleY = state.canvasH / rect.height;
+      const dxCanvas = (e.clientX - magnifierDragStart.clientX) * scaleX;
+      const dyCanvas = (e.clientY - magnifierDragStart.clientY) * scaleY;
+      const loupe = state.magnifier.loupes[state.magnifier.activeLoupe];
+      if (!loupe) return;
+      if (magnifierDragMode === 'target') {
+        loupe.targetX = Math.min(1, Math.max(0, magnifierDragStart.targetX + dxCanvas / state.canvasW));
+        loupe.targetY = Math.min(1, Math.max(0, magnifierDragStart.targetY + dyCanvas / state.canvasH));
+      } else if (magnifierDragMode === 'loupe') {
+        const clamped = clampLoupePosition(loupe, magnifierDragStart.loupeX + dxCanvas / state.canvasW, magnifierDragStart.loupeY + dyCanvas / state.canvasH);
+        loupe.loupeX = clamped.x;
+        loupe.loupeY = clamped.y;
+      } else if (magnifierDragMode === 'pan' && loupe.detailImg) {
+        // same idea as the main photo's pan drag: convert the screen-px
+        // delta into a fraction of the detail image's own (cover-scaled)
+        // on-screen size, independent of which canvas resolution this is
+        const { r } = loupeCircle(loupe, state.canvasW, state.canvasH);
+        const img = loupe.detailImg;
+        const d = r * 2;
+        const coverScale = Math.max(d / img.naturalWidth, d / img.naturalHeight);
+        const scale = coverScale * loupe.detailZoom;
+        const destW = img.naturalWidth * scale, destH = img.naturalHeight * scale;
+        const clampedPan = clampDetailPan(loupe, magnifierDragStart.panX - dxCanvas / destW, magnifierDragStart.panY - dyCanvas / destH);
+        loupe.detailPanX = clampedPan.x;
+        loupe.detailPanY = clampedPan.y;
+      }
+      render();
+      return;
+    }
+
     if (dragging) {
       const p = clientToCanvas(e.clientX, e.clientY);
       const clamped = clampLogoPosition(p.x / state.canvasW, p.y / state.canvasH);
@@ -3217,6 +4005,8 @@
     textDragging = false;
     textDragStart = null;
     dragGuideTarget = null;
+    magnifierDragMode = null;
+    magnifierDragStart = null;
     render();
   }
   canvas.addEventListener('pointerup', endDrag);
@@ -3551,6 +4341,8 @@
 
     safeZoneToggle.checked = state.safeZone;
     presetSelect.value = state.preset;
+
+    syncMagnifierPanelFromState();
   }
 
   async function init() {
