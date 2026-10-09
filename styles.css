@@ -213,16 +213,27 @@ html, body {
   background: var(--panel-bg);
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+  /* scroll horizontally instead of squeezing every tab into an equal
+     share of the width -- with 9+ tabs that was forcing "Text Box" (the
+     only two-word label) onto a second line, growing the tabbar's own
+     height and stealing vertical space the canvas needed, which is what
+     was clipping the bottom of a tall 9:16 canvas during editing even
+     though export (which never reads this layout) was always correct */
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
 }
+.tabbar::-webkit-scrollbar { display: none; }
 
 .tab-btn {
-  flex: 1;
+  flex: 0 0 auto;
   background: none;
   border: none;
   color: var(--text-dim);
-  padding: 10px 4px;
+  padding: 10px 14px;
   font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
 }
 .tab-btn.active {

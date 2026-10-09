@@ -4765,7 +4765,9 @@
     }
 
     if (document.fonts && document.fonts.ready) {
-      document.fonts.ready.then(() => render());
+      // a web font swapping in can shift text metrics (e.g. the tabbar's
+      // own layout), so re-fit the stage too, not just repaint the canvas
+      document.fonts.ready.then(() => { fitStageToViewport(); render(); });
     }
   }
 
