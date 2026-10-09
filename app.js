@@ -11,14 +11,19 @@
     '1200x628':  { w: 1200, h: 628,  label: 'Landscape / Link ad — 1.91:1' },
   };
 
+  // weightRegular is what the "non-bold" option in Text Box falls back to --
+  // Playfair/Fraunces only ship 600/700 weight font files (see fonts/fonts.css),
+  // so their "regular" is 600, not a true 400, otherwise the browser would
+  // just fall back to the nearest loaded weight (600) and the toggle would
+  // silently do nothing
   const FONTS = [
-    { id: 'playfair', label: 'Playfair Display', css: "'Playfair Display', Georgia, serif", weight: 700 },
-    { id: 'fraunces', label: 'Fraunces', css: "'Fraunces', Georgia, serif", weight: 700 },
-    { id: 'georgia', label: 'Georgia', css: "Georgia, 'Times New Roman', serif", weight: 700 },
-    { id: 'inter', label: 'Inter', css: "'Inter', system-ui, sans-serif", weight: 700 },
-    { id: 'worksans', label: 'Work Sans', css: "'Work Sans', system-ui, sans-serif", weight: 700 },
-    { id: 'archivo', label: 'Archivo', css: "'Archivo', system-ui, sans-serif", weight: 700 },
-    { id: 'system', label: 'System', css: "system-ui, -apple-system, sans-serif", weight: 700 },
+    { id: 'playfair', label: 'Playfair Display', css: "'Playfair Display', Georgia, serif", weight: 700, weightRegular: 600 },
+    { id: 'fraunces', label: 'Fraunces', css: "'Fraunces', Georgia, serif", weight: 700, weightRegular: 600 },
+    { id: 'georgia', label: 'Georgia', css: "Georgia, 'Times New Roman', serif", weight: 700, weightRegular: 400 },
+    { id: 'inter', label: 'Inter', css: "'Inter', system-ui, sans-serif", weight: 700, weightRegular: 400 },
+    { id: 'worksans', label: 'Work Sans', css: "'Work Sans', system-ui, sans-serif", weight: 700, weightRegular: 400 },
+    { id: 'archivo', label: 'Archivo', css: "'Archivo', system-ui, sans-serif", weight: 700, weightRegular: 400 },
+    { id: 'system', label: 'System', css: "system-ui, -apple-system, sans-serif", weight: 700, weightRegular: 400 },
   ];
 
   // continuous fade-speed slider (0=slow/gradual, 100=fast/early-solid), mapped
@@ -75,6 +80,7 @@
       id: `ftb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       text: 'Your text here',
       font: 'worksans',
+      bold: true,
       size: 48,       // px, scaled relative to a 1080-wide reference, like the other text layers
       color: '#ffffff',
       hAlign: 'center', // 'left' | 'center' | 'right'
@@ -1817,6 +1823,7 @@
     if (!hasBox) return;
     freeTextContent.value = box.text;
     freeTextFont.value = box.font;
+    setSegmentedActive('freeTextWeight', box.bold === false ? 'regular' : 'bold');
     freeTextSize.value = box.size;
     freeTextSizeVal.textContent = `${box.size}px`;
     freeTextColor.value = box.color;
@@ -1857,6 +1864,10 @@
   freeTextFont.addEventListener('change', () => {
     const box = activeFreeTextBoxObj();
     if (box) { box.font = freeTextFont.value; render(); }
+  });
+  wireSegmented('freeTextWeight', (val) => {
+    const box = activeFreeTextBoxObj();
+    if (box) { box.bold = val === 'bold'; render(); }
   });
   freeTextSize.addEventListener('input', () => {
     const box = activeFreeTextBoxObj();
@@ -2650,7 +2661,11 @@
 
   function fontCss(layer, sizePx) {
     const f = FONTS.find(f => f.id === layer.font) || FONTS[0];
-    return `${f.weight} ${sizePx}px ${f.css}`;
+    // only free text boxes carry a `bold` field -- the headline/subheader/
+    // other layers never do, so `layer.bold === false` is never true for
+    // them and they keep rendering at the font's normal (bold) weight
+    const weight = layer.bold === false ? (f.weightRegular || 400) : f.weight;
+    return `${weight} ${sizePx}px ${f.css}`;
   }
 
   function wrapText(text, maxWidth, sizePx, layer) {
