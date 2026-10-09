@@ -139,6 +139,7 @@
       textureGrainSize: 25, // 0-100, particle size: 0=finest, 100=coarsest
     },
     text: {
+      enabled: true, // master on/off for the whole headline/subheader/other block, including the headline
       hAlign: 'center',
       vAlign: 100, // 0=top .. 100=bottom, continuous
       orientation: 'horizontal', // 'horizontal' | 'vertical' | 'vertical-flipped'
@@ -328,6 +329,7 @@
       marginVFrac: state.marginVFrac,
       fade: { ...state.fade },
       text: {
+        enabled: state.text.enabled,
         hAlign: state.text.hAlign,
         vAlign: state.text.vAlign,
         orientation: state.text.orientation,
@@ -395,6 +397,7 @@
     }
     if (recipe.effects) Object.assign(state.effects, recipe.effects);
     if (recipe.text) {
+      state.text.enabled = typeof recipe.text.enabled === 'boolean' ? recipe.text.enabled : true; // pre-textBlockEnabled recipes defaulted on
       if (recipe.text.hAlign) state.text.hAlign = recipe.text.hAlign;
       if (recipe.text.orientation) state.text.orientation = recipe.text.orientation;
       if (typeof recipe.text.crossAlign === 'number') state.text.crossAlign = recipe.text.crossAlign;
@@ -1444,6 +1447,11 @@
     const clamped = clampLogoPosition(state.logo.xPct, state.logo.yPct);
     state.logo.xPct = clamped.xPct;
     state.logo.yPct = clamped.yPct;
+    render();
+  });
+
+  document.getElementById('textBlockEnabled').addEventListener('change', (e) => {
+    state.text.enabled = e.target.checked;
     render();
   });
 
@@ -2715,6 +2723,7 @@
   // for; now continuous (and draggable) for both orientations, with hAlign
   // left purely as which way each line's text visually aligns.
   function computeTextLayout(W, H) {
+    if (!state.text.enabled) return null; // master toggle off -- whole block (headline included) hidden and undraggable
     const orientation = state.text.orientation || 'horizontal';
     const vertical = orientation !== 'horizontal';
     const effW = vertical ? H : W, effH = vertical ? W : H;
@@ -4539,6 +4548,7 @@
 
   function syncAllControlsFromState() {
     ['headline', 'subheader', 'other'].forEach(syncLayerPanel);
+    document.getElementById('textBlockEnabled').checked = state.text.enabled;
     document.getElementById('otherEnabled').checked = state.text.layers.other.enabled;
     document.getElementById('subheaderEnabled').checked = state.text.layers.subheader.enabled;
 
