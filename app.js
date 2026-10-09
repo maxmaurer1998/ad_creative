@@ -1395,6 +1395,23 @@
     if (maxY <= minY) return 50;
     return Math.round(((yPct - minY) / (maxY - minY)) * 100);
   }
+  // same idea along the horizontal axis, 0 (left) .. 100 (right)
+  function starsHPosValueToXPct(value) {
+    const { minX, maxX } = getStarsBounds();
+    if (minX > maxX) return 0.5;
+    return minX + (maxX - minX) * (value / 100);
+  }
+  function xPctToStarsHPosValue(xPct) {
+    const { minX, maxX } = getStarsBounds();
+    if (maxX <= minX) return 50;
+    return Math.round(((xPct - minX) / (maxX - minX)) * 100);
+  }
+
+  const starsHPos = document.getElementById('starsHPos');
+  starsHPos.addEventListener('input', () => {
+    state.stars.xPct = starsHPosValueToXPct(Number(starsHPos.value));
+    render();
+  });
 
   const starsVPos = document.getElementById('starsVPos');
   starsVPos.addEventListener('input', () => {
@@ -3600,6 +3617,7 @@
     paintComposite(W, H, true);
     updateMagnifierHints(W, H);
     logoVPos.value = yPctToLogoVPosValue(state.logo.yPct);
+    starsHPos.value = xPctToStarsHPosValue(state.stars.xPct);
     starsVPos.value = yPctToStarsVPosValue(state.stars.yPct);
     // keeps the X/Y sliders live while dragging the loupe/target/detail-pan
     // directly on canvas, same reasoning as the logo/stars vertical sliders above
@@ -4615,6 +4633,7 @@
     marginVSlider.value = Math.round(state.marginVFrac * 100);
     marginVVal.textContent = `${marginVSlider.value}%`;
     logoVPos.value = yPctToLogoVPosValue(state.logo.yPct);
+    starsHPos.value = xPctToStarsHPosValue(state.stars.xPct);
     starsVPos.value = yPctToStarsVPosValue(state.stars.yPct);
 
     imageZoom.value = Math.round(state.imageTransform.zoom * 100);
