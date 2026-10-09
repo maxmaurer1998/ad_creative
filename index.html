@@ -59,6 +59,7 @@
     <button class="tab-btn" data-panel="panel-logo">Logo</button>
     <button class="tab-btn" data-panel="panel-stars">Stars</button>
     <button class="tab-btn" data-panel="panel-magnifier">Magnifier</button>
+    <button class="tab-btn" data-panel="panel-freetext">Text Box</button>
     <button class="tab-btn" data-panel="panel-effects">Effects</button>
   </nav>
 
@@ -500,7 +501,7 @@
       </div>
       <div class="control-row">
         <label for="magnifierDiameter">Loupe size <span id="magnifierDiameterVal">28%</span></label>
-        <input type="range" id="magnifierDiameter" min="15" max="45" value="28" />
+        <input type="range" id="magnifierDiameter" min="8" max="60" value="28" />
       </div>
       <p class="hint-text">Drag the loupe directly on the canvas (with "Move loupe" selected above), or use the X/Y sliders for precise placement — stored as a percentage of the canvas, so it carries sensibly between the 4:5 and 9:16 formats. Keep it clear of the product's hero detail and the headline text.</p>
 
@@ -554,6 +555,61 @@
           <button type="button" data-val="below" class="active">Below loupe</button>
           <button type="button" data-val="above">Above loupe</button>
           <button type="button" data-val="beside">Beside</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- FREE TEXT BOX PANEL -->
+    <div class="panel" id="panel-freetext">
+      <p class="hint-text">Free-floating text boxes, separate from the headline/subheader/other block above — drag them anywhere on the canvas, not limited to the shared left/right/top/bottom margins. Add as many as you like.</p>
+      <div class="control-row">
+        <div class="segmented" id="freeTextChips"></div>
+      </div>
+      <div class="control-row">
+        <button type="button" id="freeTextAddBtn" class="btn btn-secondary">Add text box</button>
+        <button type="button" id="freeTextDeleteBtn" class="btn btn-secondary">Delete this box</button>
+      </div>
+
+      <div id="freeTextEmptyHint" class="hint-text hidden">No text boxes yet — tap "Add text box" to create one, then drag it anywhere on the canvas.</div>
+
+      <div id="freeTextControls">
+        <div class="control-row">
+          <label for="freeTextContent">Text</label>
+          <textarea id="freeTextContent" class="layer-text" rows="2"></textarea>
+        </div>
+        <div class="control-row">
+          <label for="freeTextFont">Font</label>
+          <select id="freeTextFont"></select>
+        </div>
+        <div class="control-row">
+          <label for="freeTextSize">Size <span id="freeTextSizeVal">48px</span></label>
+          <input type="range" id="freeTextSize" min="12" max="160" value="48" />
+        </div>
+        <div class="control-row">
+          <label for="freeTextColor">Colour</label>
+          <input type="color" id="freeTextColor" value="#ffffff" />
+          <button type="button" class="eyedropper-btn" data-color-target="freeTextColor" title="Pick colour from image" aria-label="Pick colour from image">💧</button>
+        </div>
+        <div class="control-row">
+          <label>Alignment</label>
+          <div class="segmented" id="freeTextHAlign">
+            <button type="button" data-val="left">Left</button>
+            <button type="button" data-val="center" class="active">Center</button>
+            <button type="button" data-val="right">Right</button>
+          </div>
+        </div>
+        <div class="control-row">
+          <label for="freeTextWidth">Wrap width <span id="freeTextWidthVal">60%</span></label>
+          <input type="range" id="freeTextWidth" min="10" max="100" value="60" />
+        </div>
+        <p class="hint-text">Drag the text box directly on the canvas to position it, or set X/Y precisely below.</p>
+        <div class="control-row">
+          <label for="freeTextX">Position X <span id="freeTextXVal">50%</span></label>
+          <input type="range" id="freeTextX" min="0" max="100" value="50" />
+        </div>
+        <div class="control-row">
+          <label for="freeTextY">Position Y <span id="freeTextYVal">50%</span></label>
+          <input type="range" id="freeTextY" min="0" max="100" value="50" />
         </div>
       </div>
     </div>

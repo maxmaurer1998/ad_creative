@@ -67,6 +67,23 @@
     };
   }
 
+  // a free-floating text box: unlike the headline/subheader/other block,
+  // it isn't clamped to the shared left/right/top/bottom margins -- it can
+  // be dragged and placed anywhere on the canvas
+  function makeDefaultFreeTextBox() {
+    return {
+      id: `ftb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      text: 'Your text here',
+      font: 'worksans',
+      size: 48,       // px, scaled relative to a 1080-wide reference, like the other text layers
+      color: '#ffffff',
+      hAlign: 'center', // 'left' | 'center' | 'right'
+      xPct: 0.5,       // centre x, fraction of canvas width
+      yPct: 0.5,       // centre y, fraction of canvas height
+      widthPct: 0.6,   // wrap width, fraction of canvas width
+    };
+  }
+
   const state = {
     preset: '1080x1350',
     canvasW: 1080,
@@ -105,6 +122,11 @@
         makeDefaultLoupe(0.80, 0.78, 0.74, 0.46, true),
         makeDefaultLoupe(0.20, 0.78, 0.26, 0.46, false),
       ],
+    },
+    freeTextEditMode: false, // true only while the Text Box tab is open
+    freeText: {
+      activeBox: 0, // which box the panel is currently editing
+      boxes: [], // makeDefaultFreeTextBox() objects, added via the "Add text box" button
     },
     fade: {
       direction: 'bottom',
@@ -352,6 +374,10 @@
           labelPosition: l.labelPosition,
         })),
       },
+      freeText: {
+        activeBox: state.freeText.activeBox,
+        boxes: state.freeText.boxes.map((b) => ({ ...b })),
+      },
       effects: { ...state.effects },
     };
   }
@@ -418,6 +444,11 @@
           loupeFields.forEach((k) => { if (l[k] !== undefined) target[k] = l[k]; });
         });
       }
+    }
+    if (recipe.freeText && Array.isArray(recipe.freeText.boxes)) {
+      const defaults = makeDefaultFreeTextBox();
+      state.freeText.boxes = recipe.freeText.boxes.map((b) => ({ ...defaults, ...b, id: b.id || makeId() }));
+      state.freeText.activeBox = typeof recipe.freeText.activeBox === 'number' ? Math.min(recipe.freeText.activeBox, Math.max(0, state.freeText.boxes.length - 1)) : 0;
     }
   }
 
@@ -1025,6 +1056,9 @@
     // detail-pan) -- only live while its tab is open, so it can't be
     // dragged by accident while editing something else
     state.magnifierEditMode = btn.dataset.panel === 'panel-magnifier';
+    // same idea for free text boxes -- only draggable while their own tab is open
+    state.freeTextEditMode = btn.dataset.panel === 'panel-freetext';
+    render();
   });
 
   document.getElementById('layerTabs').addEventListener('click', (e) => {
@@ -1713,6 +1747,125 @@
     render();
   });
   wireSegmented('magnifierLabelPosition', (val) => { activeLoupeObj().labelPosition = val; render(); });
+
+  // ---------- free text boxes (independent of the headline/subheader/other block) ----------
+
+  const freeTextChips = document.getElementById('freeTextChips');
+  const freeTextControls = document.getElementById('freeTextControls');
+  const freeTextEmptyHint = document.getElementById('freeTextEmptyHint');
+  const freeTextContent = document.getElementById('freeTextContent');
+  const freeTextFont = document.getElementById('freeTextFont');
+  const freeTextSize = document.getElementById('freeTextSize');
+  const freeTextSizeVal = document.getElementById('freeTextSizeVal');
+  const freeTextColor = document.getElementById('freeTextColor');
+  const freeTextWidth = document.getElementById('freeTextWidth');
+  const freeTextWidthVal = document.getElementById('freeTextWidthVal');
+  const freeTextX = document.getElementById('freeTextX');
+  const freeTextXVal = document.getElementById('freeTextXVal');
+  const freeTextY = document.getElementById('freeTextY');
+  const freeTextYVal = document.getElementById('freeTextYVal');
+
+  populateFontSelect(freeTextFont);
+
+  function renderFreeTextChips() {
+    freeTextChips.innerHTML = '';
+    state.freeText.boxes.forEach((box, i) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.dataset.val = String(i);
+      btn.textContent = `Box ${i + 1}`;
+      if (i === state.freeText.activeBox) btn.classList.add('active');
+      freeTextChips.appendChild(btn);
+    });
+  }
+
+  function syncFreeTextPanelFromState() {
+    renderFreeTextChips();
+    const box = activeFreeTextBoxObj();
+    const hasBox = !!box;
+    freeTextControls.classList.toggle('hidden', !hasBox);
+    freeTextEmptyHint.classList.toggle('hidden', hasBox);
+    document.getElementById('freeTextDeleteBtn').disabled = !hasBox;
+    if (!hasBox) return;
+    freeTextContent.value = box.text;
+    freeTextFont.value = box.font;
+    freeTextSize.value = box.size;
+    freeTextSizeVal.textContent = `${box.size}px`;
+    freeTextColor.value = box.color;
+    setSegmentedActive('freeTextHAlign', box.hAlign);
+    freeTextWidth.value = Math.round(box.widthPct * 100);
+    freeTextWidthVal.textContent = `${freeTextWidth.value}%`;
+    freeTextX.value = Math.round(box.xPct * 100);
+    freeTextXVal.textContent = `${freeTextX.value}%`;
+    freeTextY.value = Math.round(box.yPct * 100);
+    freeTextYVal.textContent = `${freeTextY.value}%`;
+  }
+
+  document.getElementById('freeTextAddBtn').addEventListener('click', () => {
+    state.freeText.boxes.push(makeDefaultFreeTextBox());
+    state.freeText.activeBox = state.freeText.boxes.length - 1;
+    syncFreeTextPanelFromState();
+    render();
+  });
+
+  document.getElementById('freeTextDeleteBtn').addEventListener('click', () => {
+    if (!state.freeText.boxes.length) return;
+    state.freeText.boxes.splice(state.freeText.activeBox, 1);
+    state.freeText.activeBox = Math.max(0, Math.min(state.freeText.activeBox, state.freeText.boxes.length - 1));
+    syncFreeTextPanelFromState();
+    render();
+  });
+
+  wireSegmented('freeTextChips', (val) => {
+    state.freeText.activeBox = Number(val);
+    syncFreeTextPanelFromState();
+    render();
+  });
+
+  freeTextContent.addEventListener('input', () => {
+    const box = activeFreeTextBoxObj();
+    if (box) { box.text = freeTextContent.value; render(); }
+  });
+  freeTextFont.addEventListener('change', () => {
+    const box = activeFreeTextBoxObj();
+    if (box) { box.font = freeTextFont.value; render(); }
+  });
+  freeTextSize.addEventListener('input', () => {
+    const box = activeFreeTextBoxObj();
+    if (!box) return;
+    box.size = Number(freeTextSize.value);
+    freeTextSizeVal.textContent = `${box.size}px`;
+    render();
+  });
+  freeTextColor.addEventListener('input', () => {
+    const box = activeFreeTextBoxObj();
+    if (box) { box.color = freeTextColor.value; render(); }
+  });
+  wireSegmented('freeTextHAlign', (val) => {
+    const box = activeFreeTextBoxObj();
+    if (box) { box.hAlign = val; render(); }
+  });
+  freeTextWidth.addEventListener('input', () => {
+    const box = activeFreeTextBoxObj();
+    if (!box) return;
+    box.widthPct = Number(freeTextWidth.value) / 100;
+    freeTextWidthVal.textContent = `${freeTextWidth.value}%`;
+    render();
+  });
+  freeTextX.addEventListener('input', () => {
+    const box = activeFreeTextBoxObj();
+    if (!box) return;
+    box.xPct = Number(freeTextX.value) / 100;
+    freeTextXVal.textContent = `${freeTextX.value}%`;
+    render();
+  });
+  freeTextY.addEventListener('input', () => {
+    const box = activeFreeTextBoxObj();
+    if (!box) return;
+    box.yPct = Number(freeTextY.value) / 100;
+    freeTextYVal.textContent = `${freeTextY.value}%`;
+    render();
+  });
 
   // ---------- fade drawing ----------
 
@@ -2848,6 +3001,68 @@
     ctx.restore();
   }
 
+  // ---------- free text boxes (independent of the headline/subheader/other block + its shared margins) ----------
+
+  function activeFreeTextBoxObj() { return state.freeText.boxes[state.freeText.activeBox] || null; }
+
+  // returns the box's real-canvas-space bounding rect, used for both drawing
+  // and the drag hit-test, so they always agree on where the box actually is
+  function freeTextBoxLayout(box, W, H) {
+    const sizePx = (box.size / 1080) * W;
+    const maxWidth = box.widthPct * W;
+    const lines = wrapText(box.text, maxWidth, sizePx, box);
+    const lineHeight = sizePx * 1.18;
+    const totalH = lines.length * lineHeight;
+    // ctx.font/measureText below reuse whatever wrapText just left set
+    let widestLine = 0;
+    lines.forEach((line) => { widestLine = Math.max(widestLine, ctx.measureText(line).width); });
+    const cx = box.xPct * W, cy = box.yPct * H;
+    const boxLeft = cx - maxWidth / 2, boxRight = cx + maxWidth / 2;
+    const top = cy - totalH / 2, bottom = cy + totalH / 2;
+    let left, right;
+    if (box.hAlign === 'left') { left = boxLeft; right = boxLeft + widestLine; }
+    else if (box.hAlign === 'right') { left = boxRight - widestLine; right = boxRight; }
+    else { left = cx - widestLine / 2; right = cx + widestLine / 2; }
+    return { sizePx, lines, lineHeight, totalH, cx, cy, boxLeft, boxRight, top, bottom, left, right };
+  }
+
+  function drawFreeTextBoxes(W, H) {
+    return state.freeText.boxes.map((box, index) => {
+      if (!box.text.trim()) return { box, index, layout: null };
+      const layout = freeTextBoxLayout(box, W, H);
+      ctx.save();
+      ctx.font = fontCss(box, layout.sizePx);
+      ctx.fillStyle = box.color;
+      ctx.textBaseline = 'top';
+      ctx.textAlign = box.hAlign;
+      const x = box.hAlign === 'left' ? layout.boxLeft : box.hAlign === 'right' ? layout.boxRight : layout.cx;
+      let y = layout.top;
+      layout.lines.forEach((line) => {
+        ctx.fillText(line, x, y);
+        y += layout.lineHeight;
+      });
+      ctx.restore();
+      return { box, index, layout };
+    });
+  }
+
+  // faint dashed outline around whichever box the panel is currently
+  // editing, shown only while the Text Box tab is open -- the hit-test for
+  // dragging it uses the exact same rect, so what you see is what you drag
+  function drawFreeTextEditingAids(W, H, freeTextResults) {
+    if (!state.freeTextEditMode) return;
+    const result = freeTextResults.find((r) => r.index === state.freeText.activeBox);
+    if (!result || !result.layout) return;
+    const scale = W / 1080;
+    const pad = 10 * scale;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(124,109,255,0.8)';
+    ctx.lineWidth = Math.max(1.5, 1.5 * scale);
+    ctx.setLineDash([W * 0.01, W * 0.008]);
+    ctx.strokeRect(result.layout.boxLeft - pad, result.layout.top - pad, (result.layout.boxRight - result.layout.boxLeft) + pad * 2, result.layout.totalH + pad * 2);
+    ctx.restore();
+  }
+
   // ---------- magnifier (premium "loupe" detail callout) ----------
 
   const MAGNIFIER_INK = '#2B1E16';
@@ -3313,6 +3528,7 @@
   // baked into an export, regardless of whether they're toggled on.
   let lastMagnifierResults = []; // set by paintComposite, read by render() for the safe-zone/hint UI below
   let lastTextBounds = null; // set by paintComposite, read for the loupe/headline overlap warning
+  let lastFreeTextResults = []; // set by paintComposite, read by the pointerdown hit-test for dragging a free text box
 
   function paintComposite(W, H, includeEditingAids) {
     ctx.clearRect(0, 0, W, H);
@@ -3334,6 +3550,7 @@
     const textBounds = drawTextBlock(W, H);
     drawLogo(W, H);
     drawStars(W, H);
+    const freeTextResults = drawFreeTextBoxes(W, H);
     const magnifierResults = drawMagnifier(W, H);
     drawEffects(W, H, state.effects);
     if (includeEditingAids) {
@@ -3341,9 +3558,11 @@
       drawSmartGuides(W, H, textBounds);
       drawSafeZone(W, H);
       drawMagnifierEditingAids(W, H, magnifierResults, textBounds);
+      drawFreeTextEditingAids(W, H, freeTextResults);
     }
     lastMagnifierResults = magnifierResults;
     lastTextBounds = textBounds;
+    lastFreeTextResults = freeTextResults;
     return textBounds;
   }
 
@@ -3366,6 +3585,16 @@
       magnifierDetailPanXVal.textContent = `${magnifierDetailPanX.value}%`;
       magnifierDetailPanY.value = Math.round(loupe.detailPanY * 100);
       magnifierDetailPanYVal.textContent = `${magnifierDetailPanY.value}%`;
+    }
+    // same idea while dragging a free text box directly on canvas
+    if (freeTextDragging) {
+      const box = activeFreeTextBoxObj();
+      if (box) {
+        freeTextX.value = Math.round(box.xPct * 100);
+        freeTextXVal.textContent = `${freeTextX.value}%`;
+        freeTextY.value = Math.round(box.yPct * 100);
+        freeTextYVal.textContent = `${freeTextY.value}%`;
+      }
     }
     scheduleSaveRecipe();
   }
@@ -3657,6 +3886,8 @@
   let textDragStart = null; // { clientX, clientY, vAlign, crossAlign }
   let magnifierDragMode = null; // null | 'target' | 'loupe' | 'pan' -- only while state.magnifierEditMode
   let magnifierDragStart = null; // { clientX, clientY, ...whatever magnifierDragMode needs to resume from }
+  let freeTextDragging = false; // only while state.freeTextEditMode, dragging the currently active box
+  let freeTextDragStart = null; // { clientX, clientY, xPct, yPct }
   let photoDragging = false; // photo pan
   let panStart = null; // { clientX, clientY, offsetXPct, offsetYPct }
   const activePointers = new Map(); // pointerId -> {x, y}, for pinch-zoom
@@ -3792,6 +4023,23 @@
       return;
     }
 
+    // mode-exclusive, same idea -- while the Text Box tab is open, canvas
+    // drags only ever touch the box currently being edited in the panel
+    if (state.freeTextEditMode) {
+      const box = activeFreeTextBoxObj();
+      if (!box) return;
+      const mp = clientToCanvas(e.clientX, e.clientY);
+      const layout = freeTextBoxLayout(box, state.canvasW, state.canvasH);
+      const pad = 14 * (state.canvasW / 1080);
+      if (mp.x >= layout.boxLeft - pad && mp.x <= layout.boxRight + pad && mp.y >= layout.top - pad && mp.y <= layout.bottom + pad) {
+        freeTextDragging = true;
+        freeTextDragStart = { clientX: e.clientX, clientY: e.clientY, xPct: box.xPct, yPct: box.yPct };
+        canvas.setPointerCapture(e.pointerId);
+        render();
+      }
+      return;
+    }
+
     const p = clientToCanvas(e.clientX, e.clientY);
 
     if (state.stars.enabled) {
@@ -3921,6 +4169,23 @@
       return;
     }
 
+    if (freeTextDragging && freeTextDragStart) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = state.canvasW / rect.width;
+      const scaleY = state.canvasH / rect.height;
+      const dxCanvas = (e.clientX - freeTextDragStart.clientX) * scaleX;
+      const dyCanvas = (e.clientY - freeTextDragStart.clientY) * scaleY;
+      const box = activeFreeTextBoxObj();
+      if (box) {
+        // no left/right/top/bottom margin clamp, unlike the headline block --
+        // free to place anywhere on the canvas, per spec
+        box.xPct = Math.min(1, Math.max(0, freeTextDragStart.xPct + dxCanvas / state.canvasW));
+        box.yPct = Math.min(1, Math.max(0, freeTextDragStart.yPct + dyCanvas / state.canvasH));
+      }
+      render();
+      return;
+    }
+
     if (dragging) {
       const p = clientToCanvas(e.clientX, e.clientY);
       const clamped = clampLogoPosition(p.x / state.canvasW, p.y / state.canvasH);
@@ -4007,6 +4272,8 @@
     dragGuideTarget = null;
     magnifierDragMode = null;
     magnifierDragStart = null;
+    freeTextDragging = false;
+    freeTextDragStart = null;
     render();
   }
   canvas.addEventListener('pointerup', endDrag);
@@ -4343,6 +4610,7 @@
     presetSelect.value = state.preset;
 
     syncMagnifierPanelFromState();
+    syncFreeTextPanelFromState();
   }
 
   async function init() {

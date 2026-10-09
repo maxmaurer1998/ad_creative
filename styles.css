@@ -214,6 +214,9 @@ html, body {
 }
 .panel-warning.hidden { display: none; }
 
+#freeTextEmptyHint.hidden,
+#freeTextControls.hidden { display: none; }
+
 .sidebar {
   display: flex;
   flex-direction: column;
