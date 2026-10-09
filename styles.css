@@ -188,21 +188,6 @@ html, body {
   color: var(--accent);
 }
 
-.legibility-banner {
-  position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: 8px;
-  background: var(--danger-bg);
-  color: var(--danger-text);
-  font-size: 12px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  line-height: 1.35;
-  pointer-events: none;
-}
-.legibility-banner.hidden { display: none; }
-
 .panel-warning {
   background: var(--danger-bg);
   color: var(--danger-text);

@@ -184,7 +184,6 @@
   const stage = document.getElementById('stage');
   const stageWrap = document.getElementById('stageWrap');
   const dropHint = document.getElementById('dropHint');
-  const legibilityBanner = document.getElementById('legibilityBanner');
   const exportBtn = document.getElementById('exportBtn');
   const saveBtn = document.getElementById('saveBtn');
   const imageInput = document.getElementById('imageInput');
@@ -2601,46 +2600,6 @@
     }
   }
 
-  // the fade's alpha at a single canvas point, for any direction -- the
-  // legibility check samples a grid of these rather than assuming the fade
-  // runs vertically, since it can now run along either axis.
-  function sampleFadeAlpha(fade, W, H, x, y) {
-    const vertical = fade.direction === 'top' || fade.direction === 'bottom';
-    const extent = vertical ? H : W;
-    const scrim = extent * (fade.reach / 100);
-    if (scrim <= 0) return 0;
-    const plateauK = speedValueToPlateauK(fade.speed);
-    const intensity = (typeof fade.intensity === 'number' ? fade.intensity : 100) / 100;
-    const pos = vertical ? y : x;
-    const towardEnd = fade.direction === 'bottom' || fade.direction === 'right';
-    const outer = towardEnd ? extent - scrim : scrim;
-    let frac;
-    if (towardEnd) {
-      if (pos <= outer) return 0;
-      frac = (pos - outer) / scrim;
-    } else {
-      if (pos >= outer) return 0;
-      frac = (outer - pos) / scrim;
-    }
-    return fadeAlphaAt(Math.min(1, frac), plateauK) * intensity;
-  }
-
-  // average fade alpha over a rectangle {left,right,top,bottom} in canvas
-  // space (for the legibility check) -- a grid rather than a single axis so
-  // it works regardless of which way the fade or the text block runs.
-  function avgFadeAlphaOverRect(W, H, fade, rect) {
-    const cols = 6, rows = 6;
-    let total = 0;
-    for (let i = 0; i < cols; i++) {
-      const x = rect.left + (rect.right - rect.left) * (cols === 1 ? 0.5 : i / (cols - 1));
-      for (let j = 0; j < rows; j++) {
-        const y = rect.top + (rect.bottom - rect.top) * (rows === 1 ? 0.5 : j / (rows - 1));
-        total += sampleFadeAlpha(fade, W, H, x, y);
-      }
-    }
-    return total / (cols * rows);
-  }
-
   // ---------- text drawing ----------
 
   function fontCss(layer, sizePx) {
@@ -2748,8 +2707,8 @@
   }
 
   // the block's real-canvas-space bounding rect {left,right,top,bottom} --
-  // used for alignment guides, the drag hit-test, and the legibility check.
-  // Uses the widest actual rendered line (maxLineWidth), not the full wrap
+  // used for alignment guides and the drag hit-test. Uses the widest actual
+  // rendered line (maxLineWidth), not the full wrap
   // width, so it's a tight fit rather than a conservative full-axis band.
   function computeTextBoundsFromLayout(W, H, layout) {
     const { orientation, vertical, totalHeight, maxLineWidth, startY, x } = layout;
@@ -3577,8 +3536,7 @@
 
   function render() {
     const W = state.canvasW, H = state.canvasH;
-    const textBounds = paintComposite(W, H, true);
-    updateLegibilityBanner(W, H, textBounds);
+    paintComposite(W, H, true);
     updateMagnifierHints(W, H);
     logoVPos.value = yPctToLogoVPosValue(state.logo.yPct);
     starsVPos.value = yPctToStarsVPosValue(state.stars.yPct);
@@ -3789,25 +3747,6 @@
       offsetXPct,
       offsetYPct,
     };
-  }
-
-  const FADE_DIRECTION_SUGGESTION = {
-    bottom: 'try sliding the text down, toward the bottom, or increase the fade\'s reach/intensity',
-    top: 'try sliding the text up, toward the top, or increase the fade\'s reach/intensity',
-    right: 'try moving the text further right, or increase the fade\'s reach/intensity',
-    left: 'try moving the text further left, or increase the fade\'s reach/intensity',
-  };
-
-  function updateLegibilityBanner(W, H, textBounds) {
-    if (!textBounds) { legibilityBanner.classList.add('hidden'); return; }
-    const avgAlpha = avgFadeAlphaOverRect(W, H, state.fade, textBounds);
-    if (avgAlpha < 0.4) {
-      const suggestion = FADE_DIRECTION_SUGGESTION[state.fade.direction] || 'increase the fade\'s reach/intensity';
-      legibilityBanner.textContent = `Text may be hard to read here — ${suggestion}.`;
-      legibilityBanner.classList.remove('hidden');
-    } else {
-      legibilityBanner.classList.add('hidden');
-    }
   }
 
   // warns, for whichever loupe the panel is currently editing, when the
