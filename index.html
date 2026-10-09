@@ -615,6 +615,16 @@
           <label for="freeTextY">Position Y <span id="freeTextYVal">50%</span></label>
           <input type="range" id="freeTextY" min="0" max="100" value="50" />
         </div>
+        <div class="control-row">
+          <label>Snap to margin</label>
+          <div class="segmented segmented-2x2" id="freeTextMarginSnap">
+            <button type="button" data-val="left">Left</button>
+            <button type="button" data-val="right">Right</button>
+            <button type="button" data-val="top">Top</button>
+            <button type="button" data-val="bottom">Bottom</button>
+          </div>
+        </div>
+        <p class="hint-text">Snaps the box's edge to the same left/right/top/bottom margin the logo uses, so they line up exactly — the other axis is left where it is.</p>
       </div>
     </div>
 

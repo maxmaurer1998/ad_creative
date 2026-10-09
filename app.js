@@ -1874,6 +1874,31 @@
     render();
   });
 
+  // snaps the box's left/right/top/bottom edge to the exact same
+  // marginFrac/marginVFrac the logo (and the headline/subheader/other
+  // block) are clamped to, so a text box lines up with them precisely --
+  // the box's own wrap-width/height, not just its centre, so the edge
+  // itself (not just the midpoint) lands on the margin
+  document.getElementById('freeTextMarginSnap').addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    const box = activeFreeTextBoxObj();
+    if (!box) return;
+    const W = state.canvasW, H = state.canvasH;
+    const edge = btn.dataset.val;
+    if (edge === 'left') box.xPct = state.marginFrac + box.widthPct / 2;
+    else if (edge === 'right') box.xPct = 1 - state.marginFrac - box.widthPct / 2;
+    else if (edge === 'top' || edge === 'bottom') {
+      const layout = freeTextBoxLayout(box, W, H);
+      const halfHFrac = (layout.totalH / H) / 2;
+      box.yPct = edge === 'top' ? state.marginVFrac + halfHFrac : 1 - state.marginVFrac - halfHFrac;
+    }
+    box.xPct = Math.min(1, Math.max(0, box.xPct));
+    box.yPct = Math.min(1, Math.max(0, box.yPct));
+    syncFreeTextPanelFromState();
+    render();
+  });
+
   // ---------- fade drawing ----------
 
   function hexToRgb(hex) {
