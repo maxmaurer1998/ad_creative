@@ -1595,6 +1595,10 @@
   const magnifierFillOpacityVal = document.getElementById('magnifierFillOpacityVal');
   const magnifierLabelText = document.getElementById('magnifierLabelText');
   const magnifierLoupeEnabled = document.getElementById('magnifierLoupeEnabled');
+  const magnifierTargetX = document.getElementById('magnifierTargetX');
+  const magnifierTargetXVal = document.getElementById('magnifierTargetXVal');
+  const magnifierTargetY = document.getElementById('magnifierTargetY');
+  const magnifierTargetYVal = document.getElementById('magnifierTargetYVal');
 
   // refreshes every control in the Magnifier panel to reflect whichever
   // loupe is currently selected (the "Loupe 1"/"Loupe 2" chips) -- called on
@@ -1620,6 +1624,10 @@
     setSegmentedActive('magnifierStyle', loupe.style);
     document.getElementById('magnifierShadow').checked = loupe.shadow;
     setSegmentedActive('magnifierMarker', loupe.marker);
+    magnifierTargetX.value = Math.round(loupe.targetX * 100);
+    magnifierTargetXVal.textContent = `${magnifierTargetX.value}%`;
+    magnifierTargetY.value = Math.round(loupe.targetY * 100);
+    magnifierTargetYVal.textContent = `${magnifierTargetY.value}%`;
     setSegmentedActive('magnifierConnectorType', loupe.connectorType);
     magnifierLineOpacity.value = Math.round(loupe.lineOpacity * 100);
     magnifierLineOpacityVal.textContent = `${magnifierLineOpacity.value}%`;
@@ -1737,6 +1745,19 @@
   document.getElementById('magnifierShadow').addEventListener('change', (e) => { activeLoupeObj().shadow = e.target.checked; render(); });
   wireSegmented('magnifierMarker', (val) => { activeLoupeObj().marker = val; render(); });
   wireSegmented('magnifierConnectorType', (val) => { activeLoupeObj().connectorType = val; render(); });
+
+  magnifierTargetX.addEventListener('input', () => {
+    const loupe = activeLoupeObj();
+    loupe.targetX = Number(magnifierTargetX.value) / 100;
+    magnifierTargetXVal.textContent = `${magnifierTargetX.value}%`;
+    render();
+  });
+  magnifierTargetY.addEventListener('input', () => {
+    const loupe = activeLoupeObj();
+    loupe.targetY = Number(magnifierTargetY.value) / 100;
+    magnifierTargetYVal.textContent = `${magnifierTargetY.value}%`;
+    render();
+  });
 
   magnifierLineOpacity.addEventListener('input', () => {
     activeLoupeObj().lineOpacity = Number(magnifierLineOpacity.value) / 100;
@@ -3577,6 +3598,10 @@
       magnifierDetailPanXVal.textContent = `${magnifierDetailPanX.value}%`;
       magnifierDetailPanY.value = Math.round(loupe.detailPanY * 100);
       magnifierDetailPanYVal.textContent = `${magnifierDetailPanY.value}%`;
+      magnifierTargetX.value = Math.round(loupe.targetX * 100);
+      magnifierTargetXVal.textContent = `${magnifierTargetX.value}%`;
+      magnifierTargetY.value = Math.round(loupe.targetY * 100);
+      magnifierTargetYVal.textContent = `${magnifierTargetY.value}%`;
     }
     // same idea while dragging a free text box directly on canvas
     if (freeTextDragging) {
@@ -3974,7 +3999,7 @@
       const scale = state.canvasW / 1080;
       const { cx, cy, r } = loupeCircle(loupe, state.canvasW, state.canvasH);
       const px = loupe.targetX * state.canvasW, py = loupe.targetY * state.canvasH;
-      const targetHitR = 16 * scale; // generous hit area around the (small) marker
+      const targetHitR = 40 * scale; // generous touch-friendly hit area around the (small) marker -- bare glyph size would be unreliable to tap on a phone
       const dtx = mp.x - px, dty = mp.y - py;
       if (Math.sqrt(dtx * dtx + dty * dty) <= targetHitR) {
         magnifierDragMode = 'target';
