@@ -2899,10 +2899,12 @@
   // clamp the logo's center x so its left/right edges never cross the same
   // margin used by the text block, at any logo size
   function getLogoBounds() {
-    const { halfW, halfH } = logoHalfFracs();
+    const { halfH } = logoHalfFracs();
     return {
-      minX: state.marginFrac + halfW,
-      maxX: 1 - state.marginFrac - halfW,
+      // horizontal: as free as a Text Box or the stars -- the centre can
+      // go anywhere from the left edge to the right edge, no margin clamp
+      minX: 0,
+      maxX: 1,
       minY: state.marginVFrac + halfH,
       maxY: 1 - state.marginVFrac - halfH,
     };

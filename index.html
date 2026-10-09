@@ -88,7 +88,7 @@
         <label for="marginVSlider">Top/bottom margin <span id="marginVVal">6%</span></label>
         <input type="range" id="marginVSlider" min="2" max="20" value="6" />
       </div>
-      <p class="hint-text">Both margins apply symmetrically (equal on each side) and are shared by the headline/subheader/other text and how close the logo can be positioned to any edge.</p>
+      <p class="hint-text">Both margins apply symmetrically (equal on each side) and are shared by the headline/subheader/other text's full extent and the logo/stars' vertical range — horizontally, the logo and stars can be positioned all the way to either edge.</p>
       <div class="control-row">
         <label for="imageInput2">Photo</label>
         <label for="imageInput" class="btn btn-secondary">Choose photo…</label>
@@ -399,7 +399,7 @@
         </div>
       </div>
       <p class="hint-text">Tints the logo's opaque pixels: "Custom" uses the colour you pick, "Match fade" always tracks the current fade colour. Works well for a single-colour/silhouette logo; a multi-colour logo will lose its original colours when either is on.</p>
-      <p class="hint-text">Drag the logo directly on the canvas, or use the slider above for precise vertical placement. Guide lines appear while dragging — the logo can't be moved past the same left/right or top/bottom margins as the text, at any size.</p>
+      <p class="hint-text">Drag the logo directly on the canvas, or use the sliders above for precise placement — horizontally it can go all the way to either edge, vertically it stays within the top/bottom margins. Guide lines appear while dragging, and it'll snap into alignment with the text, stars, or any text box.</p>
       <div class="control-row">
         <label>Default logo</label>
         <button id="saveLogoBtn" class="btn btn-secondary">Save as default</button>
@@ -456,7 +456,7 @@
           </button>
         </div>
       </div>
-      <p class="hint-text">Drag the stars directly on the canvas, or use the slider above for precise vertical placement. Guide lines appear while dragging — the stars can't be moved past the same margins as the logo and text, and align with either of them the same way.</p>
+      <p class="hint-text">Drag the stars directly on the canvas, or use the sliders above for precise placement — horizontally they can go all the way to either edge, vertically they stay within the top/bottom margins. Guide lines appear while dragging, and they'll snap into alignment with the logo, text, or any text box.</p>
     </div>
 
     <!-- MAGNIFIER (PREMIUM LOUPE DETAIL CALLOUT) PANEL -->
