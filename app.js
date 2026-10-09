@@ -1314,6 +1314,24 @@
     if (maxY <= minY) return 50;
     return Math.round(((yPct - minY) / (maxY - minY)) * 100);
   }
+  // same idea along the horizontal axis, 0 (left) .. 100 (right)
+  function logoHPosValueToXPct(value) {
+    const { minX, maxX } = getLogoBounds();
+    if (minX > maxX) return 0.5;
+    return minX + (maxX - minX) * (value / 100);
+  }
+  function xPctToLogoHPosValue(xPct) {
+    const { minX, maxX } = getLogoBounds();
+    if (maxX <= minX) return 50;
+    return Math.round(((xPct - minX) / (maxX - minX)) * 100);
+  }
+
+  const logoHPos = document.getElementById('logoHPos');
+  logoHPos.addEventListener('input', () => {
+    state.logo.xPct = logoHPosValueToXPct(Number(logoHPos.value));
+    state.logo.manuallyPositioned = true;
+    render();
+  });
 
   const logoVPos = document.getElementById('logoVPos');
   logoVPos.addEventListener('input', () => {
@@ -1333,6 +1351,7 @@
     const clamped = clampLogoPosition(state.logo.xPct, state.logo.yPct);
     state.logo.xPct = clamped.xPct;
     state.logo.yPct = clamped.yPct;
+    logoHPos.value = xPctToLogoHPosValue(state.logo.xPct);
     logoVPos.value = yPctToLogoVPosValue(state.logo.yPct);
     render();
   });
@@ -2986,10 +3005,12 @@
   }
 
   function getStarsBounds() {
-    const { halfW, halfH } = starsHalfFracs();
+    const { halfH } = starsHalfFracs();
     return {
-      minX: state.marginFrac + halfW,
-      maxX: 1 - state.marginFrac - halfW,
+      // horizontal: as free as a Text Box -- the centre can go anywhere
+      // from the left edge to the right edge, no margin clamp
+      minX: 0,
+      maxX: 1,
       minY: state.marginVFrac + halfH,
       maxY: 1 - state.marginVFrac - halfH,
     };
@@ -3683,6 +3704,7 @@
     const W = state.canvasW, H = state.canvasH;
     paintComposite(W, H, true);
     updateMagnifierHints(W, H);
+    logoHPos.value = xPctToLogoHPosValue(state.logo.xPct);
     logoVPos.value = yPctToLogoVPosValue(state.logo.yPct);
     starsHPos.value = xPctToStarsHPosValue(state.stars.xPct);
     starsVPos.value = yPctToStarsVPosValue(state.stars.yPct);
@@ -4715,6 +4737,7 @@
     marginVal.textContent = `${marginSlider.value}%`;
     marginVSlider.value = Math.round(state.marginVFrac * 100);
     marginVVal.textContent = `${marginVSlider.value}%`;
+    logoHPos.value = xPctToLogoHPosValue(state.logo.xPct);
     logoVPos.value = yPctToLogoVPosValue(state.logo.yPct);
     starsHPos.value = xPctToStarsHPosValue(state.stars.xPct);
     starsVPos.value = yPctToStarsVPosValue(state.stars.yPct);
