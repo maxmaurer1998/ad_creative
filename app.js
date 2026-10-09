@@ -3485,7 +3485,7 @@
 
   // ---------- drag margin guide lines (shown while dragging the logo, text or stars) ----------
 
-  let dragGuideTarget = null; // null | 'logo' | 'text' | 'stars' -- which object is being dragged, if any
+  let dragGuideTarget = null; // null | 'logo' | 'text' | 'stars' | 'freetext<index>' -- which object is being dragged, if any
 
   function drawDragGuides(W, H) {
     if (!dragGuideTarget) return;
@@ -3510,27 +3510,43 @@
     ctx.restore();
   }
 
-  // ---------- smart alignment guides (shown while dragging the logo, text or stars) ----------
-  // beyond the always-on margin lines above, these appear only when the
-  // dragged object's edges or centre line up with the canvas centre or
-  // either *other* object's own edges/centre -- the same "does this line up
-  // with that other element" signal design tools give you, rather than a
-  // fixed reference. Whichever of logo/text/stars is being dragged is
-  // compared against the other two, symmetrically.
-  function drawSmartGuides(W, H, textBounds) {
-    if (!dragGuideTarget) return;
-    const rects = {
-      logo: logoRect(W, H),
-      stars: starsRect(W, H),
-      text: textBounds ? { x: textBounds.left, y: textBounds.top, w: textBounds.right - textBounds.left, h: textBounds.bottom - textBounds.top } : null,
-    };
-    const dragged = rects[dragGuideTarget];
-    const others = Object.keys(rects).filter((k) => k !== dragGuideTarget).map((k) => rects[k]).filter(Boolean);
-    if (!dragged) return;
+  // ---------- smart alignment guides + snapping (logo, text, stars, free text boxes) ----------
 
-    const scale = W / 1080;
-    const tol = 6 * scale;
+  // how close (in 1080-canvas-width-reference px) an edge/centre has to get
+  // before it's considered "aligned" -- shared by the visual guide-line
+  // match test and the actual magnetic snap below, so they can't disagree.
+  // 6px worked out to only ~2 real screen px on a typical phone (the canvas
+  // is usually displayed well below its internal 1080px resolution), too
+  // tight to reliably catch by touch -- same lesson as the magnifier target
+  // marker's hit-area fix.
+  const GUIDE_SNAP_TOL_AT_1080 = 14;
 
+  // shared by the visual guide lines below and the actual magnetic-snap
+  // helper further down, so the two can never disagree about what counts
+  // as "aligned" -- every draggable object's current on-canvas rect, keyed
+  // the same way dragGuideTarget identifies whichever one is being dragged
+  // ('logo' | 'text' | 'stars' | 'freetext<index>')
+  function buildGuideRects(W, H) {
+    const rects = { logo: logoRect(W, H), stars: starsRect(W, H) };
+    const textLayout = computeTextLayout(W, H);
+    if (textLayout) {
+      const tb = computeTextBoundsFromLayout(W, H, textLayout);
+      rects.text = { x: tb.left, y: tb.top, w: tb.right - tb.left, h: tb.bottom - tb.top };
+    } else {
+      rects.text = null;
+    }
+    state.freeText.boxes.forEach((box, i) => {
+      if (!box.text.trim()) { rects[`freetext${i}`] = null; return; }
+      const layout = freeTextBoxLayout(box, W, H);
+      rects[`freetext${i}`] = { x: layout.boxLeft, y: layout.top, w: layout.boxRight - layout.boxLeft, h: layout.totalH };
+    });
+    return rects;
+  }
+
+  // the candidate alignment lines for a drag: the canvas centre, both
+  // margins, and every *other* rect's own left/centre/right (or top/
+  // middle/bottom) -- "middle of a text box" included, same as any edge
+  function guideTargets(W, H, others) {
     const marginPx = W * state.marginFrac;
     const marginVPx = H * state.marginVFrac;
     const xTargets = [W / 2, marginPx, W - marginPx];
@@ -3539,6 +3555,23 @@
       xTargets.push(other.x, other.x + other.w, other.x + other.w / 2);
       yTargets.push(other.y, other.y + other.h, other.y + other.h / 2);
     });
+    return { xTargets, yTargets };
+  }
+
+  // beyond the always-on margin lines above, these appear only when the
+  // dragged object's edges or centre line up with the canvas centre, the
+  // margins, or another object's own edges/centre -- the same "does this
+  // line up with that other element" signal design tools give you.
+  function drawSmartGuides(W, H) {
+    if (!dragGuideTarget) return;
+    const rects = buildGuideRects(W, H);
+    const dragged = rects[dragGuideTarget];
+    const others = Object.keys(rects).filter((k) => k !== dragGuideTarget).map((k) => rects[k]).filter(Boolean);
+    if (!dragged) return;
+
+    const scale = W / 1080;
+    const tol = GUIDE_SNAP_TOL_AT_1080 * scale;
+    const { xTargets, yTargets } = guideTargets(W, H, others);
 
     const draggedXs = [dragged.x, dragged.x + dragged.w, dragged.x + dragged.w / 2];
     const draggedYs = [dragged.y, dragged.y + dragged.h, dragged.y + dragged.h / 2];
@@ -3555,6 +3588,40 @@
     matchedX.forEach((x) => { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); });
     matchedY.forEach((y) => { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); });
     ctx.restore();
+  }
+
+  // magnetic counterpart to the lines above -- actually nudges the dragged
+  // rect (not just drawing a line) onto the nearest matched edge/centre
+  // when one is within tolerance, checking its own left/centre/right (or
+  // top/middle/bottom) independently so any of the three can catch
+  function snapRectDelta(W, H, dragged, others) {
+    const scale = W / 1080;
+    const tol = GUIDE_SNAP_TOL_AT_1080 * scale;
+    const { xTargets, yTargets } = guideTargets(W, H, others);
+    const draggedXs = [dragged.x, dragged.x + dragged.w / 2, dragged.x + dragged.w];
+    const draggedYs = [dragged.y, dragged.y + dragged.h / 2, dragged.y + dragged.h];
+    let dx = 0, bestX = tol;
+    draggedXs.forEach((pos) => xTargets.forEach((t) => {
+      const d = t - pos;
+      if (Math.abs(d) < bestX) { bestX = Math.abs(d); dx = d; }
+    }));
+    let dy = 0, bestY = tol;
+    draggedYs.forEach((pos) => yTargets.forEach((t) => {
+      const d = t - pos;
+      if (Math.abs(d) < bestY) { bestY = Math.abs(d); dy = d; }
+    }));
+    return { dx, dy };
+  }
+
+  // applies snapRectDelta to a centre-anchored xPct/yPct object (stars,
+  // logo, a free text box) -- builds its current rect from the *other*
+  // objects' rects (itself excluded), nudges it, then hands back the
+  // snapped centre as a fraction of W/H for the caller to clamp as usual
+  function snappedCenterPct(W, H, guideKey, rect) {
+    const rects = buildGuideRects(W, H);
+    const others = Object.keys(rects).filter((k) => k !== guideKey).map((k) => rects[k]).filter(Boolean);
+    const { dx, dy } = snapRectDelta(W, H, rect, others);
+    return { xPct: (rect.x + rect.w / 2 + dx) / W, yPct: (rect.y + rect.h / 2 + dy) / H };
   }
 
   // ---------- safe zone overlay ----------
@@ -3601,7 +3668,7 @@
     drawEffects(W, H, state.effects);
     if (includeEditingAids) {
       drawDragGuides(W, H);
-      drawSmartGuides(W, H, textBounds);
+      drawSmartGuides(W, H);
       drawSafeZone(W, H);
       drawMagnifierEditingAids(W, H, magnifierResults, textBounds);
       drawFreeTextEditingAids(W, H, freeTextResults);
@@ -4065,6 +4132,7 @@
       if (mp.x >= layout.boxLeft - pad && mp.x <= layout.boxRight + pad && mp.y >= layout.top - pad && mp.y <= layout.bottom + pad) {
         freeTextDragging = true;
         freeTextDragStart = { clientX: e.clientX, clientY: e.clientY, xPct: box.xPct, yPct: box.yPct };
+        dragGuideTarget = `freetext${state.freeText.activeBox}`;
         canvas.setPointerCapture(e.pointerId);
         render();
       }
@@ -4212,6 +4280,13 @@
         // free to place anywhere on the canvas, per spec
         box.xPct = Math.min(1, Math.max(0, freeTextDragStart.xPct + dxCanvas / state.canvasW));
         box.yPct = Math.min(1, Math.max(0, freeTextDragStart.yPct + dyCanvas / state.canvasH));
+        // magnetic snap onto the logo, headline block, stars, or any other
+        // text box's own left/centre/right or top/middle/bottom
+        const layout = freeTextBoxLayout(box, state.canvasW, state.canvasH);
+        const rect = { x: layout.boxLeft, y: layout.top, w: layout.boxRight - layout.boxLeft, h: layout.totalH };
+        const snapped = snappedCenterPct(state.canvasW, state.canvasH, `freetext${state.freeText.activeBox}`, rect);
+        box.xPct = Math.min(1, Math.max(0, snapped.xPct));
+        box.yPct = Math.min(1, Math.max(0, snapped.yPct));
       }
       render();
       return;
@@ -4223,6 +4298,10 @@
       state.logo.xPct = clamped.xPct;
       state.logo.yPct = clamped.yPct;
       state.logo.manuallyPositioned = true;
+      const snapped = snappedCenterPct(state.canvasW, state.canvasH, 'logo', logoRect(state.canvasW, state.canvasH));
+      const reclamped = clampLogoPosition(snapped.xPct, snapped.yPct);
+      state.logo.xPct = reclamped.xPct;
+      state.logo.yPct = reclamped.yPct;
       render();
       return;
     }
@@ -4232,6 +4311,10 @@
       const clamped = clampStarsPosition(p.x / state.canvasW, p.y / state.canvasH);
       state.stars.xPct = clamped.xPct;
       state.stars.yPct = clamped.yPct;
+      const snapped = snappedCenterPct(state.canvasW, state.canvasH, 'stars', starsRect(state.canvasW, state.canvasH));
+      const reclamped = clampStarsPosition(snapped.xPct, snapped.yPct);
+      state.stars.xPct = reclamped.xPct;
+      state.stars.yPct = reclamped.yPct;
       render();
       return;
     }
