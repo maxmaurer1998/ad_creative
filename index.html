@@ -130,6 +130,23 @@
         </div>
       </div>
       <div class="control-row">
+        <label for="imageFineRotation">Fine rotation <span id="imageFineRotationVal">0°</span></label>
+        <input type="range" id="imageFineRotation" min="-180" max="180" value="0" />
+      </div>
+      <div class="control-row">
+        <button type="button" id="imageFineRotateMinus" class="btn btn-secondary" title="Rotate 1° left">−1°</button>
+        <button type="button" id="imageFineRotateResetBtn" class="btn btn-secondary">Reset to 0°</button>
+        <button type="button" id="imageFineRotatePlus" class="btn btn-secondary" title="Rotate 1° right">+1°</button>
+      </div>
+      <p class="hint-text">For straightening a tilted horizon — the two 90° buttons above are for correcting a sideways/upside-down photo, this is for small adjustments at any angle, one degree at a time.</p>
+      <div class="control-row">
+        <label>Flip</label>
+        <div class="segmented" id="imageFlip">
+          <button type="button" data-val="h">Horizontal</button>
+          <button type="button" data-val="v">Vertical</button>
+        </div>
+      </div>
+      <div class="control-row">
         <button id="resetImagePositionBtn" class="btn btn-secondary">Reset position</button>
       </div>
       <p class="hint-text">While this tab is open, drag directly on the photo to reposition it, and pinch (or use the Zoom slider) to zoom in. The photo locks in place again as soon as you switch to another tab. Zooming out below 100% shrinks the photo within the frame instead of cropping it further, revealing a white margin around it — handy if your photo already has white space around the subject.</p>

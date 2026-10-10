@@ -101,7 +101,7 @@
     marginFrac: DEFAULT_MARGIN_FRAC, // left/right margin, shared by text wrap and logo drag clamp
     marginVFrac: DEFAULT_MARGIN_V_FRAC, // top/bottom margin, shared by text vertical range and logo vertical clamp
     image: null,   // HTMLImageElement
-    imageTransform: { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5, rotation: 0 }, // pan/zoom/rotation, tied to this specific photo
+    imageTransform: { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5, rotation: 0, fineRotation: 0, flipH: false, flipV: false }, // pan/zoom/rotation/straighten/flip, tied to this specific photo
     positionEditMode: false, // true only while the Position tab is open
     logo: {
       img: null,
@@ -565,7 +565,9 @@
         exportBtn.disabled = false;
         saveBtn.disabled = false;
         if (imageTransform && typeof imageTransform.zoom === 'number') {
-          state.imageTransform = imageTransform;
+          // fineRotation/flipH/flipV are newer fields -- default them in
+          // for a session saved before they existed
+          state.imageTransform = { fineRotation: 0, flipH: false, flipV: false, ...imageTransform };
         }
       }
     }
@@ -982,9 +984,14 @@
 
       if (project.recipe) applyRecipeToState(project.recipe);
       if (project.imageTransform && typeof project.imageTransform.zoom === 'number') {
-        state.imageTransform = project.imageTransform;
+        // fineRotation/flipH/flipV are newer fields -- default them in for
+        // a project saved before they existed
+        state.imageTransform = {
+          fineRotation: 0, flipH: false, flipV: false,
+          ...project.imageTransform,
+        };
       } else {
-        state.imageTransform = { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5, rotation: 0 };
+        state.imageTransform = { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5, rotation: 0, fineRotation: 0, flipH: false, flipV: false };
       }
 
       setCurrentProject({ id: project.id, name: project.name, folderId: project.folderId });
@@ -1469,11 +1476,51 @@
     render();
   });
 
+  // straighten/fine-rotate: 1°-at-a-time, independent of the 90° buttons
+  // above (that's for sideways/upside-down orientation; this is for a
+  // tilted horizon) -- a continuous slider plus explicit −1°/+1° nudge
+  // buttons for precise single-degree steps
+  const imageFineRotation = document.getElementById('imageFineRotation');
+  const imageFineRotationVal = document.getElementById('imageFineRotationVal');
+  function setFineRotation(deg) {
+    state.imageTransform.fineRotation = Math.min(180, Math.max(-180, Math.round(deg)));
+    imageFineRotation.value = state.imageTransform.fineRotation;
+    imageFineRotationVal.textContent = `${state.imageTransform.fineRotation}°`;
+    render();
+  }
+  imageFineRotation.addEventListener('input', () => setFineRotation(Number(imageFineRotation.value)));
+  document.getElementById('imageFineRotateMinus').addEventListener('click', () => {
+    if (!state.image) return;
+    setFineRotation((state.imageTransform.fineRotation || 0) - 1);
+  });
+  document.getElementById('imageFineRotatePlus').addEventListener('click', () => {
+    if (!state.image) return;
+    setFineRotation((state.imageTransform.fineRotation || 0) + 1);
+  });
+  document.getElementById('imageFineRotateResetBtn').addEventListener('click', () => setFineRotation(0));
+
+  // flip buttons are independent on/off toggles, not an exclusive choice --
+  // same pattern as the logo's own flip control
+  document.getElementById('imageFlip').addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn || !state.image) return;
+    if (btn.dataset.val === 'h') state.imageTransform.flipH = !state.imageTransform.flipH;
+    else state.imageTransform.flipV = !state.imageTransform.flipV;
+    btn.classList.toggle('active');
+    render();
+  });
+
   document.getElementById('resetImagePositionBtn').addEventListener('click', () => {
-    // pan/zoom only -- rotation is a deliberate orientation choice, not a
-    // "position", so it's left as-is (matching the logo's own rotate control,
-    // which position presets don't touch either)
-    state.imageTransform = { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5, rotation: state.imageTransform.rotation || 0 };
+    // pan/zoom only -- rotation/straighten/flip are deliberate orientation
+    // choices, not a "position", so they're left as-is (matching the
+    // logo's own rotate/flip controls, which position presets don't touch
+    // either)
+    const prevT = state.imageTransform;
+    state.imageTransform = {
+      zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5,
+      rotation: prevT.rotation || 0, fineRotation: prevT.fineRotation || 0,
+      flipH: !!prevT.flipH, flipV: !!prevT.flipV,
+    };
     imageZoom.value = 100;
     imageZoomVal.textContent = '100%';
     render();
@@ -1600,7 +1647,7 @@
     if (!file) return;
     loadImageFile(file, (img) => {
       state.image = img;
-      state.imageTransform = { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5, rotation: 0 }; // reset crop/rotation for the new photo
+      state.imageTransform = { zoom: 1, offsetXPct: 0.5, offsetYPct: 0.5, rotation: 0, fineRotation: 0, flipH: false, flipV: false }; // reset crop/rotation for the new photo
       imageZoom.value = 100;
       imageZoomVal.textContent = '100%';
       videoKeyframeA = null; // old points don't apply to a new photo's content
@@ -3834,12 +3881,22 @@
   // swaps which of the image's natural dimensions ends up as its on-screen
   // width vs height, so the "which axis is constrained" choice has to swap
   // with it too, or the cover-fit would be computed for the wrong shape.
+  // the fine (1°-at-a-time) rotation on top of the 90° orientation needs a
+  // larger cover scale than an axis-aligned fit -- at any angle, the
+  // smallest the image can be while its rotated rectangle still fully
+  // covers a W×H frame is given by projecting the frame's half-extents
+  // onto the image's own (rotated) axes: a frame corner, un-rotated back
+  // into the image's local space, must still land inside the image's own
+  // unrotated bounding box on both axes, for every corner -- the standard
+  // "cover a box with a rotated rectangle" formula.
   function coverScaleFor(img, W, H) {
     const rotation = state.imageTransform.rotation || 0;
     const swapped = rotation === 90 || rotation === 270;
     const iw = swapped ? img.naturalHeight : img.naturalWidth;
     const ih = swapped ? img.naturalWidth : img.naturalHeight;
-    return Math.max(W / iw, H / ih);
+    const fineRad = ((state.imageTransform.fineRotation || 0) * Math.PI) / 180;
+    const cos = Math.abs(Math.cos(fineRad)), sin = Math.abs(Math.sin(fineRad));
+    return Math.max((W * cos + H * sin) / iw, (W * sin + H * cos) / ih);
   }
 
   // The whole pan/zoom model is one formula: draw the *entire* source image
@@ -3900,21 +3957,27 @@
   function drawImageCover(img, W, H) {
     const t = state.imageTransform;
     const rotation = t.rotation || 0;
-    const rotationRad = (rotation * Math.PI) / 180;
+    const fineRotation = t.fineRotation || 0;
+    const totalDeg = rotation + fineRotation;
+    const rotationRad = (totalDeg * Math.PI) / 180;
     const scale = coverScaleFor(img, W, H) * t.zoom;
     const destW = img.naturalWidth * scale, destH = img.naturalHeight * scale;
     const level = pickDownscaleSource(img, destW, destH);
     const left = -t.offsetXPct * destW, top = -t.offsetYPct * destH;
     ctx.save();
     ctx.translate(W / 2, H / 2);
-    if (rotation) ctx.rotate(rotationRad);
+    if (totalDeg) ctx.rotate(rotationRad);
+    ctx.scale(t.flipH ? -1 : 1, t.flipV ? -1 : 1);
     ctx.drawImage(level.canvas, level.innerX, level.innerY, level.innerW, level.innerH, left, top, destW, destH);
-    // the canvas's own 4 corners, expressed in this same rotated local space
-    // (i.e. un-rotated relative to the transform just applied), so their
-    // bounding box is what "the canvas edge" means from in here
+    // the canvas's own 4 corners, expressed in this same rotated+flipped
+    // local space (i.e. undoing both transforms just applied, in reverse
+    // order), so their bounding box is what "the canvas edge" means from
+    // in here
     const cos = Math.cos(-rotationRad), sin = Math.sin(-rotationRad);
-    const corners = [[-W / 2, -H / 2], [W / 2, -H / 2], [-W / 2, H / 2], [W / 2, H / 2]]
+    let corners = [[-W / 2, -H / 2], [W / 2, -H / 2], [-W / 2, H / 2], [W / 2, H / 2]]
       .map(([x, y]) => [x * cos - y * sin, x * sin + y * cos]);
+    if (t.flipH) corners = corners.map(([x, y]) => [-x, y]);
+    if (t.flipV) corners = corners.map(([x, y]) => [x, -y]);
     const canvasLeft = Math.min(...corners.map((c) => c[0]));
     const canvasRight = Math.max(...corners.map((c) => c[0]));
     const canvasTop = Math.min(...corners.map((c) => c[1]));
@@ -4245,18 +4308,19 @@
         const scaleY = state.canvasH / rect.height;
         const dxCanvas = (e.clientX - panStart.clientX) * scaleX;
         const dyCanvas = (e.clientY - panStart.clientY) * scaleY;
-        // offsetXPct/offsetYPct are fractions of the *unrotated* image, but
-        // the drag happens in on-screen (rotated) space -- map the screen
-        // delta back into the image's own local axes first. This is the
-        // inverse of the draw rotation in drawImageCover, i.e. rotating the
-        // screen delta by -rotation (derived the same way as the vertical
-        // text drag mapping above).
-        const rotation = state.imageTransform.rotation || 0;
-        let du, dv;
-        if (rotation === 90) { du = dyCanvas; dv = -dxCanvas; }
-        else if (rotation === 180) { du = -dxCanvas; dv = -dyCanvas; }
-        else if (rotation === 270) { du = -dyCanvas; dv = dxCanvas; }
-        else { du = dxCanvas; dv = dyCanvas; }
+        // offsetXPct/offsetYPct are fractions of the *unrotated, unflipped*
+        // image, but the drag happens in on-screen (rotated+flipped) space
+        // -- map the screen delta back into the image's own local axes
+        // first. This is the general form of the inverse draw transform in
+        // drawImageCover (rotate by -(rotation+fineRotation), then flip),
+        // which reduces to the old hardcoded 90°-multiple cases exactly
+        // when fineRotation is 0 and nothing is flipped.
+        const totalRad = ((state.imageTransform.rotation || 0) + (state.imageTransform.fineRotation || 0)) * Math.PI / 180;
+        const cos = Math.cos(totalRad), sin = Math.sin(totalRad);
+        let du = dxCanvas * cos + dyCanvas * sin;
+        let dv = -dxCanvas * sin + dyCanvas * cos;
+        if (state.imageTransform.flipH) du = -du;
+        if (state.imageTransform.flipV) dv = -dv;
         const scale = coverScaleFor(state.image, state.canvasW, state.canvasH) * state.imageTransform.zoom;
         const dxFrac = -du / (state.image.naturalWidth * scale);
         const dyFrac = -dv / (state.image.naturalHeight * scale);
@@ -4628,11 +4692,18 @@
       await new Promise((resolve) => {
         function frame(now) {
           const rawT = Math.min((now - startTime) / durationMs, 1);
-          // rotation isn't part of the animated pan/zoom keyframes -- it's a
-          // fixed orientation choice, so it's carried through from the live
-          // transform rather than interpolated (there's nothing to interpolate:
-          // both keyframes were taken at whatever the current rotation is)
-          state.imageTransform = { ...lerpTransform(videoKeyframeA, videoKeyframeB, easeInOutT(rawT)), rotation: originalTransform.rotation || 0 };
+          // rotation/fine-rotation/flip aren't part of the animated pan/zoom
+          // keyframes -- they're a fixed orientation choice, so they're
+          // carried through from the live transform rather than interpolated
+          // (there's nothing to interpolate: both keyframes were taken at
+          // whatever the current orientation is)
+          state.imageTransform = {
+            ...lerpTransform(videoKeyframeA, videoKeyframeB, easeInOutT(rawT)),
+            rotation: originalTransform.rotation || 0,
+            fineRotation: originalTransform.fineRotation || 0,
+            flipH: !!originalTransform.flipH,
+            flipV: !!originalTransform.flipV,
+          };
           paintComposite(exportW, exportH, false);
           if (rawT < 1) requestAnimationFrame(frame);
           else resolve();
@@ -4758,6 +4829,10 @@
 
     imageZoom.value = Math.round(state.imageTransform.zoom * 100);
     imageZoomVal.textContent = `${imageZoom.value}%`;
+    imageFineRotation.value = state.imageTransform.fineRotation || 0;
+    imageFineRotationVal.textContent = `${state.imageTransform.fineRotation || 0}°`;
+    document.querySelector('#imageFlip button[data-val="h"]').classList.toggle('active', !!state.imageTransform.flipH);
+    document.querySelector('#imageFlip button[data-val="v"]').classList.toggle('active', !!state.imageTransform.flipV);
 
     safeZoneToggle.checked = state.safeZone;
     presetSelect.value = state.preset;
