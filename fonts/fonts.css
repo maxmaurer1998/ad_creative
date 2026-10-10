@@ -1,6 +1,13 @@
 @font-face {
   font-family: 'Inter';
   font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('inter-300.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
   font-weight: 400;
   font-display: swap;
   src: url('inter-400.ttf') format('truetype');
@@ -20,6 +27,13 @@
   src: url('inter-700.ttf') format('truetype');
 }
 
+@font-face {
+  font-family: 'Work Sans';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('worksans-300.ttf') format('truetype');
+}
 @font-face {
   font-family: 'Work Sans';
   font-style: normal;
@@ -45,6 +59,13 @@
 @font-face {
   font-family: 'Archivo';
   font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('archivo-300.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
   font-weight: 400;
   font-display: swap;
   src: url('archivo-400.ttf') format('truetype');
@@ -67,6 +88,13 @@
 @font-face {
   font-family: 'Playfair Display';
   font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('playfair-400.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Playfair Display';
+  font-style: normal;
   font-weight: 600;
   font-display: swap;
   src: url('playfair-600.ttf') format('truetype');
@@ -79,6 +107,13 @@
   src: url('playfair-700.ttf') format('truetype');
 }
 
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('fraunces-300.ttf') format('truetype');
+}
 @font-face {
   font-family: 'Fraunces';
   font-style: normal;

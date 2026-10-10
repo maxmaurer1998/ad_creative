@@ -11,19 +11,22 @@
     '1200x628':  { w: 1200, h: 628,  label: 'Landscape / Link ad — 1.91:1' },
   };
 
-  // weightRegular is what the "non-bold" option in Text Box falls back to --
-  // Playfair/Fraunces only ship 600/700 weight font files (see fonts/fonts.css),
-  // so their "regular" is 600, not a true 400, otherwise the browser would
-  // just fall back to the nearest loaded weight (600) and the toggle would
-  // silently do nothing
+  // weightRegular/weightLight are what Text Box's Regular/Light options
+  // fall back to -- every weight here has an actual bundled font file (see
+  // fonts/fonts.css) so each option always renders visibly distinct from
+  // the others, rather than silently resolving to the nearest loaded
+  // weight (which is what happens if you ask for a weight with no face).
+  // Playfair/Fraunces don't ship a true 400 *and* 300 face pair the way
+  // the sans fonts do, so their light step sits at 300/400 instead of the
+  // sans fonts' 300.
   const FONTS = [
-    { id: 'playfair', label: 'Playfair Display', css: "'Playfair Display', Georgia, serif", weight: 700, weightRegular: 600 },
-    { id: 'fraunces', label: 'Fraunces', css: "'Fraunces', Georgia, serif", weight: 700, weightRegular: 600 },
-    { id: 'georgia', label: 'Georgia', css: "Georgia, 'Times New Roman', serif", weight: 700, weightRegular: 400 },
-    { id: 'inter', label: 'Inter', css: "'Inter', system-ui, sans-serif", weight: 700, weightRegular: 400 },
-    { id: 'worksans', label: 'Work Sans', css: "'Work Sans', system-ui, sans-serif", weight: 700, weightRegular: 400 },
-    { id: 'archivo', label: 'Archivo', css: "'Archivo', system-ui, sans-serif", weight: 700, weightRegular: 400 },
-    { id: 'system', label: 'System', css: "system-ui, -apple-system, sans-serif", weight: 700, weightRegular: 400 },
+    { id: 'playfair', label: 'Playfair Display', css: "'Playfair Display', Georgia, serif", weight: 700, weightRegular: 600, weightLight: 400 },
+    { id: 'fraunces', label: 'Fraunces', css: "'Fraunces', Georgia, serif", weight: 700, weightRegular: 600, weightLight: 300 },
+    { id: 'georgia', label: 'Georgia', css: "Georgia, 'Times New Roman', serif", weight: 700, weightRegular: 400, weightLight: 300 },
+    { id: 'inter', label: 'Inter', css: "'Inter', system-ui, sans-serif", weight: 700, weightRegular: 400, weightLight: 300 },
+    { id: 'worksans', label: 'Work Sans', css: "'Work Sans', system-ui, sans-serif", weight: 700, weightRegular: 400, weightLight: 300 },
+    { id: 'archivo', label: 'Archivo', css: "'Archivo', system-ui, sans-serif", weight: 700, weightRegular: 400, weightLight: 300 },
+    { id: 'system', label: 'System', css: "system-ui, -apple-system, sans-serif", weight: 700, weightRegular: 400, weightLight: 300 },
   ];
 
   // continuous fade-speed slider (0=slow/gradual, 100=fast/early-solid), mapped
@@ -80,7 +83,7 @@
       id: `ftb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       text: 'Your text here',
       font: 'worksans',
-      bold: true,
+      weight: 'bold', // 'bold' | 'regular' | 'light'
       size: 48,       // px, scaled relative to a 1080-wide reference, like the other text layers
       color: '#ffffff',
       hAlign: 'center', // 'left' | 'center' | 'right'
@@ -455,7 +458,14 @@
     }
     if (recipe.freeText && Array.isArray(recipe.freeText.boxes)) {
       const defaults = makeDefaultFreeTextBox();
-      state.freeText.boxes = recipe.freeText.boxes.map((b) => ({ ...defaults, ...b, id: b.id || makeId() }));
+      state.freeText.boxes = recipe.freeText.boxes.map((b) => {
+        const box = { ...defaults, ...b, id: b.id || makeId() };
+        // pre-Light-weight recipes stored a boolean `bold` instead of the
+        // current 'bold'|'regular'|'light' `weight` string
+        if (typeof b.weight !== 'string' && typeof b.bold === 'boolean') box.weight = b.bold ? 'bold' : 'regular';
+        delete box.bold;
+        return box;
+      });
       state.freeText.activeBox = typeof recipe.freeText.activeBox === 'number' ? Math.min(recipe.freeText.activeBox, Math.max(0, state.freeText.boxes.length - 1)) : 0;
     }
   }
@@ -1859,7 +1869,7 @@
     if (!hasBox) return;
     freeTextContent.value = box.text;
     freeTextFont.value = box.font;
-    setSegmentedActive('freeTextWeight', box.bold === false ? 'regular' : 'bold');
+    setSegmentedActive('freeTextWeight', box.weight || 'bold');
     freeTextSize.value = box.size;
     freeTextSizeVal.textContent = `${box.size}px`;
     freeTextColor.value = box.color;
@@ -1903,7 +1913,7 @@
   });
   wireSegmented('freeTextWeight', (val) => {
     const box = activeFreeTextBoxObj();
-    if (box) { box.bold = val === 'bold'; render(); }
+    if (box) { box.weight = val; render(); }
   });
   freeTextSize.addEventListener('input', () => {
     const box = activeFreeTextBoxObj();
@@ -2697,10 +2707,12 @@
 
   function fontCss(layer, sizePx) {
     const f = FONTS.find(f => f.id === layer.font) || FONTS[0];
-    // only free text boxes carry a `bold` field -- the headline/subheader/
-    // other layers never do, so `layer.bold === false` is never true for
-    // them and they keep rendering at the font's normal (bold) weight
-    const weight = layer.bold === false ? (f.weightRegular || 400) : f.weight;
+    // only free text boxes carry a `weight` field -- the headline/
+    // subheader/other layers never do, so this always falls through to
+    // the font's normal (bold) weight for them
+    let weight = f.weight;
+    if (layer.weight === 'regular') weight = f.weightRegular || 400;
+    else if (layer.weight === 'light') weight = f.weightLight || 300;
     return `${weight} ${sizePx}px ${f.css}`;
   }
 

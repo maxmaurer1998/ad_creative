@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ad-creative-v5';
+const CACHE_NAME = 'ad-creative-v6';
 
 const PRECACHE_URLS = [
   './',
@@ -7,17 +7,22 @@ const PRECACHE_URLS = [
   './app.js',
   './manifest.webmanifest',
   './fonts/fonts.css',
+  './fonts/inter-300.ttf',
   './fonts/inter-400.ttf',
   './fonts/inter-600.ttf',
   './fonts/inter-700.ttf',
+  './fonts/worksans-300.ttf',
   './fonts/worksans-400.ttf',
   './fonts/worksans-600.ttf',
   './fonts/worksans-700.ttf',
+  './fonts/archivo-300.ttf',
   './fonts/archivo-400.ttf',
   './fonts/archivo-600.ttf',
   './fonts/archivo-700.ttf',
+  './fonts/playfair-400.ttf',
   './fonts/playfair-600.ttf',
   './fonts/playfair-700.ttf',
+  './fonts/fraunces-300.ttf',
   './fonts/fraunces-600.ttf',
   './fonts/fraunces-700.ttf',
   './icons/icon-192.png',
