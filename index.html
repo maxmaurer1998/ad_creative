@@ -840,26 +840,34 @@
       <p class="hint-text">Sharpens and enlarges the photo with an AI upscaler (Real-ESRGAN) that runs on this device. Nothing is uploaded. Text, logo and fade are hidden while this tab is open and come back when you leave it.</p>
       <div class="control-row">
         <label>Preset</label>
-        <div class="segmented" id="enhancePreset">
-          <button data-val="natural" class="active">Natural</button>
+        <div class="segmented segmented-2x2 enhance-presets" id="enhancePreset">
+          <button data-val="leather" class="active">Leather</button>
+          <button data-val="leatherDetail">Leather detail</button>
+          <button data-val="leatherSoft">Leather soft</button>
+          <button data-val="natural">Natural</button>
           <button data-val="balanced">Balanced</button>
           <button data-val="crisp">Crisp</button>
         </div>
       </div>
-      <p class="hint-text">Natural keeps the most real texture (leather grain, shearling fibres) and is best for product photos. Crisp cleans hardest and can look smooth or plastic.</p>
+      <p class="hint-text" id="enhancePresetHint"></p>
       <div class="control-row">
-        <label for="enhanceDenoise">Denoise <span id="enhanceDenoiseVal">12%</span></label>
-        <input type="range" id="enhanceDenoise" min="0" max="100" value="12" />
+        <label for="enhanceDenoise">Denoise <span id="enhanceDenoiseVal">5%</span></label>
+        <input type="range" id="enhanceDenoise" min="0" max="100" value="5" />
       </div>
       <div class="range-scale-labels"><span>Keep texture</span><span>Smooth</span></div>
       <div class="control-row">
-        <label for="enhanceBlend">Blend with original <span id="enhanceBlendVal">35%</span></label>
-        <input type="range" id="enhanceBlend" min="0" max="80" value="35" />
+        <label for="enhanceBlend">Blend with original <span id="enhanceBlendVal">22%</span></label>
+        <input type="range" id="enhanceBlend" min="0" max="80" value="22" />
       </div>
       <p class="hint-text">Mixes some of the original back in. More looks more like the real photo; less is sharper.</p>
       <div class="control-row">
-        <label for="enhanceGrain">Grain <span id="enhanceGrainVal">1.5</span></label>
-        <input type="range" id="enhanceGrain" min="0" max="60" value="15" />
+        <label for="enhanceSharpen">Sharpen <span id="enhanceSharpenVal">30%</span></label>
+        <input type="range" id="enhanceSharpen" min="0" max="100" value="30" />
+      </div>
+      <p class="hint-text">Crisps up fine texture (grain, creases, stitching) after enhancing, without smoothing anything. Above about 60% edges can get halos.</p>
+      <div class="control-row">
+        <label for="enhanceGrain">Grain <span id="enhanceGrainVal">1.0</span></label>
+        <input type="range" id="enhanceGrain" min="0" max="60" value="10" />
       </div>
       <div class="control-row">
         <label>Output size</label>

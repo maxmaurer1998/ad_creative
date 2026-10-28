@@ -642,3 +642,5 @@ input[type="checkbox"] {
 .enhance-progress { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; margin: 4px 0 2px; }
 .enhance-progress-bar { height: 100%; width: 0%; background: var(--accent, #2563eb); transition: width .2s ease; }
 #panel-enhance [hidden] { display: none !important; }
+.enhance-presets button { flex: 1 1 30%; }
+.enhance-presets button:last-child:nth-child(odd) { flex-basis: 30%; }

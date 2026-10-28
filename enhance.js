@@ -22,15 +22,24 @@
   const MAX_OUT_PIXELS = 16_000_000; // iPhone Safari's canvas limit is ~16.7 MP
 
   const PRESETS = {
-    natural:  { denoise: 12, blend: 35, grain: 15 },
-    balanced: { denoise: 45, blend: 22, grain: 18 },
-    crisp:    { denoise: 90, blend: 10, grain: 10 },
+    leather:       { denoise: 5,  blend: 22, sharpen: 30, grain: 10,
+      hint: 'Leather: keeps the natural grain and makes it crisper. A good default for all leather products.' },
+    leatherDetail: { denoise: 0,  blend: 15, sharpen: 50, grain: 8,
+      hint: 'Leather detail: maximum texture for close-ups of grain, creases and stitching. Check edges for halos.' },
+    leatherSoft:   { denoise: 15, blend: 30, sharpen: 15, grain: 12,
+      hint: 'Leather soft: for noisy or low-light photos. Cleans grainy shadows, keeps the leather looking real.' },
+    natural:       { denoise: 12, blend: 35, sharpen: 0,  grain: 15,
+      hint: 'Natural: the gentlest option, closest to the original photo. Good for shearling and fabric.' },
+    balanced:      { denoise: 45, blend: 22, sharpen: 10, grain: 18,
+      hint: 'Balanced: cleaner and smoother. For lifestyle shots where the product is small in frame.' },
+    crisp:         { denoise: 90, blend: 10, sharpen: 0,  grain: 10,
+      hint: 'Crisp: cleans hardest. Can make leather look smooth or plastic, so best for backgrounds and scenes.' },
   };
 
   const $ = (id) => document.getElementById(id);
   const els = {
     preset: $('enhancePreset'), denoise: $('enhanceDenoise'), denoiseVal: $('enhanceDenoiseVal'),
-    blend: $('enhanceBlend'), blendVal: $('enhanceBlendVal'), grain: $('enhanceGrain'), grainVal: $('enhanceGrainVal'),
+    blend: $('enhanceBlend'), blendVal: $('enhanceBlendVal'), sharpen: $('enhanceSharpen'), sharpenVal: $('enhanceSharpenVal'), presetHint: $('enhancePresetHint'), grain: $('enhanceGrain'), grainVal: $('enhanceGrainVal'),
     scale: $('enhanceScale'), sizeHint: $('enhanceSizeHint'), run: $('enhanceRunBtn'), cancel: $('enhanceCancelBtn'),
     progress: $('enhanceProgress'), bar: $('enhanceProgressBar'), status: $('enhanceStatus'),
     afterRow: $('enhanceAfterRow'), revert: $('enhanceRevertBtn'), download: $('enhanceDownloadBtn'),
@@ -48,11 +57,11 @@
   let swapping = false;      // true while we swap the photo ourselves
 
   // ---------- settings ----------
-  const SETTINGS_KEY = 'adCreativeEnhanceSettings';
+  const SETTINGS_KEY = 'adCreativeEnhanceSettings2';
   function saveSettings() {
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-        denoise: +els.denoise.value, blend: +els.blend.value, grain: +els.grain.value, scale,
+        denoise: +els.denoise.value, blend: +els.blend.value, sharpen: +els.sharpen.value, grain: +els.grain.value, scale,
       }));
     } catch (e) { /* storage unavailable: settings just won't be remembered */ }
   }
@@ -61,6 +70,7 @@
       const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
       if (!s) return;
       els.denoise.value = s.denoise; els.blend.value = s.blend; els.grain.value = s.grain;
+      if (s.sharpen != null) els.sharpen.value = s.sharpen;
       if (s.scale === 2 || s.scale === 4) scale = s.scale;
     } catch (e) { /* ignore */ }
   }
@@ -69,26 +79,28 @@
     els.denoiseVal.textContent = `${els.denoise.value}%`;
     els.blendVal.textContent = `${els.blend.value}%`;
     els.grainVal.textContent = (els.grain.value / 10).toFixed(1);
+    els.sharpenVal.textContent = `${els.sharpen.value}%`;
     [...els.scale.querySelectorAll('button')].forEach((b) => b.classList.toggle('active', +b.dataset.val === scale));
     let match = '';
     for (const [name, p] of Object.entries(PRESETS)) {
-      if (p.denoise === +els.denoise.value && p.blend === +els.blend.value && p.grain === +els.grain.value) match = name;
+      if (p.denoise === +els.denoise.value && p.blend === +els.blend.value && p.grain === +els.grain.value && p.sharpen === +els.sharpen.value) match = name;
     }
     [...els.preset.querySelectorAll('button')].forEach((b) => b.classList.toggle('active', b.dataset.val === match));
+    els.presetHint.textContent = match ? PRESETS[match].hint : 'Custom settings.';
     updateSizeHint();
   }
 
   els.preset.addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     const p = PRESETS[b.dataset.val]; if (!p) return;
-    els.denoise.value = p.denoise; els.blend.value = p.blend; els.grain.value = p.grain;
+    els.denoise.value = p.denoise; els.blend.value = p.blend; els.grain.value = p.grain; els.sharpen.value = p.sharpen;
     syncLabels(); saveSettings();
   });
   els.scale.addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     scale = +b.dataset.val; syncLabels(); saveSettings();
   });
-  [els.denoise, els.blend, els.grain].forEach((el) => el.addEventListener('input', () => { syncLabels(); saveSettings(); }));
+  [els.denoise, els.blend, els.sharpen, els.grain].forEach((el) => el.addEventListener('input', () => { syncLabels(); saveSettings(); }));
 
   // ---------- sizes ----------
   function plan() {
@@ -172,6 +184,39 @@
     throw lastErr || new Error('Could not start the model.');
   }
 
+  // ---------- sharpen ----------
+  // Unsharp mask: pixel + amount * (pixel - blurred pixel), with a small
+  // 3x3 gaussian blur, so it lifts fine texture rather than outlining shapes.
+  // Done in horizontal strips (with a 1-row overlap) to keep memory low.
+  async function unsharp(c, W, H, amount) {
+    const STRIP = 192;
+    for (let y0 = 0; y0 < H; y0 += STRIP) {
+      const top = Math.max(0, y0 - 1), bot = Math.min(H, y0 + STRIP + 1);
+      const hh = bot - top;
+      const id = c.getImageData(0, top, W, hh);
+      const a = id.data;
+      const src = new Uint8ClampedArray(a);
+      const row = W * 4;
+      const yStart = y0 - top, yEnd = Math.min(y0 + STRIP, H) - top;
+      for (let y = yStart; y < yEnd; y++) {
+        const yu = y > 0 ? y - 1 : y, yd = y < hh - 1 ? y + 1 : y;
+        const ru = yu * row, rc = y * row, rd = yd * row;
+        for (let x = 0; x < W; x++) {
+          const l = (x > 0 ? x - 1 : x) * 4, m = x * 4, r = (x < W - 1 ? x + 1 : x) * 4;
+          for (let ch = 0; ch < 3; ch++) {
+            const v = src[rc + m + ch];
+            const blur = (src[ru + l + ch] + src[ru + r + ch] + src[rd + l + ch] + src[rd + r + ch]
+              + 2 * (src[ru + m + ch] + src[rd + m + ch] + src[rc + l + ch] + src[rc + r + ch]) + 4 * v) / 16;
+            a[rc + m + ch] = v + amount * (v - blur);
+          }
+        }
+      }
+      // write back only this strip's own rows (not the overlap)
+      c.putImageData(id, 0, top, 0, yStart, W, yEnd - yStart);
+      await nextFrame();
+    }
+  }
+
   // ---------- main ----------
   function setStatus(t) { els.status.textContent = t; }
   function setProgress(f) { els.bar.style.width = `${Math.round(f * 100)}%`; }
@@ -187,7 +232,7 @@
     running = true; cancelled = false;
     els.run.disabled = true; els.cancel.hidden = false; els.progress.hidden = false; els.afterRow.hidden = true;
     setProgress(0);
-    const settings = { denoise: els.denoise.value / 100, blend: els.blend.value / 100, grain: els.grain.value / 10, scale };
+    const settings = { denoise: els.denoise.value / 100, blend: els.blend.value / 100, grain: els.grain.value / 10, sharpen: els.sharpen.value / 100, scale };
     try {
       const sess = await getSession();
       const ort = window.ort;
@@ -268,6 +313,11 @@
         octx.globalAlpha = settings.blend;
         octx.drawImage(img, 0, 0, p.outW, p.outH);
         octx.restore();
+      }
+      // sharpen fine texture (unsharp mask, ~1px radius), in strips
+      if (settings.sharpen > 0) {
+        setStatus('Sharpening…');
+        await unsharp(octx, p.outW, p.outH, settings.sharpen * 1.5);
       }
       // fine film grain, done in strips to keep memory low
       if (settings.grain > 0) {
