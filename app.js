@@ -1339,6 +1339,8 @@
     state.magnifierEditMode = btn.dataset.panel === 'panel-magnifier';
     // same idea for free text boxes -- only draggable while their own tab is open
     state.freeTextEditMode = btn.dataset.panel === 'panel-freetext';
+    // the Enhance tab only works on the photo, so show just the photo there
+    state.photoOnlyMode = btn.dataset.panel === 'panel-enhance';
     render();
   });
 
@@ -4067,6 +4069,12 @@
     } else {
       ctx.fillStyle = '#1a1a1e';
       ctx.fillRect(0, 0, W, H);
+    }
+
+    if (includeEditingAids && state.photoOnlyMode) {
+      // Enhance tab: on-screen preview of the photo alone (exports unaffected)
+      lastMagnifierResults = []; lastTextBounds = null; lastFreeTextResults = [];
+      return null;
     }
 
     drawFade(W, H, state.fade);
