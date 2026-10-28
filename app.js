@@ -741,6 +741,7 @@
       row.innerHTML = `
         <span class="library-row-icon">📁</span>
         <span class="library-row-name" role="button">${escapeHtml(folder.name)}</span>
+        <button class="library-row-btn" data-action="export-folder" data-id="${folder.id}">Export</button>
         <button class="library-row-btn" data-action="rename-folder" data-id="${folder.id}">Rename</button>
         <button class="library-row-btn" data-action="delete-folder" data-id="${folder.id}">Delete</button>
       `;
@@ -777,8 +778,169 @@
     });
   }
 
+  // ---------- library import / export ----------
+  // A bundle is a single JSON file holding folders + projects (with every
+  // image Blob inlined as a data URL), so a folder built in one browser can be
+  // moved into another browser's library -- e.g. a set prepared elsewhere and
+  // then opened and tweaked on your own phone/laptop. Importing never
+  // overwrites anything: every folder and project gets a fresh id and lands
+  // inside whichever folder is currently open.
+
+  const BUNDLE_FORMAT = 'ad-creative-bundle';
+  const PROJECT_BLOB_FIELDS = ['photoBlob', 'logoBlob', 'detailBlob0', 'detailBlob1', 'thumbnailBlob'];
+
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(blob);
+    });
+  }
+
+  async function dataUrlToBlob(dataUrl) {
+    const res = await fetch(dataUrl);
+    return res.blob();
+  }
+
+  // rootFolderId: the folder to export (its whole subtree), or null for the
+  // entire library
+  async function buildLibraryBundle(rootFolderId) {
+    const [allFolders, allProjects] = await Promise.all([
+      idbGetAllValues(IDB_STORE_FOLDERS),
+      idbGetAllValues(IDB_STORE_PROJECTS),
+    ]);
+    let folders;
+    let rootName = 'Library';
+    if (rootFolderId === null) {
+      folders = allFolders;
+    } else {
+      const root = allFolders.find((f) => f.id === rootFolderId);
+      if (!root) return null;
+      rootName = root.name;
+      folders = [root];
+      for (let i = 0; i < folders.length; i++) {
+        for (const child of allFolders) if (child.parentId === folders[i].id) folders.push(child);
+      }
+    }
+    const folderIds = new Set(folders.map((f) => f.id));
+    const projects = allProjects.filter((p) => (rootFolderId === null ? true : folderIds.has(p.folderId)));
+
+    // identical images (the same photo/logo reused across sizes) are stored
+    // once in `blobs` and referenced as "blob:<hash>", which keeps a folder of
+    // reel/feed/wide variants of the same shot small
+    const blobs = {};
+    async function blobRef(blob) {
+      const buf = await blob.arrayBuffer();
+      let key;
+      try {
+        const digest = await crypto.subtle.digest('SHA-256', buf);
+        key = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
+      } catch (e) {
+        key = makeId(); // no SubtleCrypto (non-secure context) -- just skip de-duplication
+      }
+      if (!blobs[key]) blobs[key] = await blobToDataUrl(blob);
+      return `blob:${key}`;
+    }
+    const outProjects = [];
+    for (const p of projects) {
+      const out = { ...p };
+      for (const k of PROJECT_BLOB_FIELDS) out[k] = p[k] ? await blobRef(p[k]) : null;
+      outProjects.push(out);
+    }
+    return {
+      format: BUNDLE_FORMAT,
+      version: 2,
+      blobs,
+      exportedAt: new Date().toISOString(),
+      name: rootName,
+      // the exported root's own parent is cut off so it re-attaches wherever it's imported
+      folders: folders.map((f) => ({ ...f, parentId: (f.id === rootFolderId) ? null : f.parentId })),
+      projects: outProjects,
+    };
+  }
+
+  async function exportLibraryFolder(rootFolderId) {
+    const bundle = await buildLibraryBundle(rootFolderId);
+    if (!bundle) { alert("Couldn't find that folder."); return; }
+    if (bundle.projects.length === 0 && bundle.folders.length === 0) { alert('Nothing to export here yet.'); return; }
+    const safe = bundle.name.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'library';
+    const file = new File([JSON.stringify(bundle)], `${safe}.adcreative.json`, { type: 'application/json' });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: bundle.name });
+        return;
+      }
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+    }
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+
+  // returns { folders, projects } counts imported
+  async function importLibraryBundle(bundle, targetFolderId) {
+    if (!bundle || bundle.format !== BUNDLE_FORMAT || !Array.isArray(bundle.folders) || !Array.isArray(bundle.projects)) {
+      throw new Error('not a bundle');
+    }
+    const idMap = new Map();
+    for (const f of bundle.folders) idMap.set(f.id, makeId());
+    const remapParent = (pid) => (pid && idMap.has(pid) ? idMap.get(pid) : targetFolderId);
+
+    for (const f of bundle.folders) {
+      const ok = await idbPut(IDB_STORE_FOLDERS, {
+        id: idMap.get(f.id),
+        parentId: remapParent(f.parentId),
+        name: String(f.name || 'Imported folder'),
+        createdAt: f.createdAt || Date.now(),
+      });
+      if (!ok) throw new Error('storage');
+    }
+    for (const p of bundle.projects) {
+      const rec = { ...p, id: makeId(), folderId: remapParent(p.folderId), name: String(p.name || 'Imported project') };
+      for (const k of PROJECT_BLOB_FIELDS) {
+        let v = p[k];
+        if (typeof v === 'string' && v.startsWith('blob:')) v = (bundle.blobs || {})[v.slice(5)] || null;
+        rec[k] = v ? await dataUrlToBlob(v) : null;
+      }
+      if (!rec.updatedAt) rec.updatedAt = Date.now();
+      const ok = await idbPut(IDB_STORE_PROJECTS, rec);
+      if (!ok) throw new Error('storage');
+    }
+    return { folders: bundle.folders.length, projects: bundle.projects.length };
+  }
+
+  document.getElementById('libraryExportBtn').addEventListener('click', () => exportLibraryFolder(libraryCurrentFolderId));
+
+  const libraryImportInput = document.getElementById('libraryImportInput');
+  libraryImportInput.addEventListener('change', async () => {
+    const file = libraryImportInput.files && libraryImportInput.files[0];
+    libraryImportInput.value = '';
+    if (!file) return;
+    try {
+      const bundle = JSON.parse(await file.text());
+      const n = await importLibraryBundle(bundle, libraryCurrentFolderId);
+      renderLibrary();
+      alert(`Imported ${n.projects} project${n.projects === 1 ? '' : 's'}${n.folders ? ` in ${n.folders} folder${n.folders === 1 ? '' : 's'}` : ''}.`);
+    } catch (err) {
+      console.error('Import failed', err);
+      alert(err && err.message === 'storage'
+        ? "Import stopped part-way -- your browser's storage may be full."
+        : "That file couldn't be imported. Pick a .adcreative.json file exported from this app.");
+      renderLibrary();
+    }
+  });
+
   async function handleLibraryRowAction(action, id) {
-    if (action === 'rename-folder') {
+    if (action === 'export-folder') {
+      await exportLibraryFolder(id);
+    } else if (action === 'rename-folder') {
       const folder = await idbGet(IDB_STORE_FOLDERS, id);
       if (!folder) return;
       const name = prompt('Rename folder:', folder.name);

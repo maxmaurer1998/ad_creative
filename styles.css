@@ -498,7 +498,8 @@ input[type="checkbox"] {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
-.library-actions .btn { flex: 1; }
+.library-actions .btn { flex: 1; text-align: center; }
+.library-actions-secondary { padding-top: 0; }
 
 .library-list {
   flex: 1;
