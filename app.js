@@ -154,9 +154,9 @@
       orientation: 'horizontal', // 'horizontal' | 'vertical' | 'vertical-flipped'
       crossAlign: 50, // 0=top .. 100=bottom, continuous -- the block's position on the cross (non-stacking) axis, only used when orientation is vertical
       layers: {
-        headline:  { text: 'New Season, New Look', font: 'playfair', size: 72, color: '#ffffff', weight: 'bold' },
-        subheader: { text: 'Shop the collection today', font: 'worksans', size: 36, color: '#ffffff', enabled: true, weight: 'bold', gapAbove: 100 },
-        other:     { text: 'Limited time only', font: 'worksans', size: 24, color: '#ffffff', enabled: false, weight: 'bold', gapAbove: 100 },
+        headline:  { text: 'New Season, New Look', font: 'playfair', size: 72, color: '#ffffff', weight: 'bold', caps: false, tracking: 0 },
+        subheader: { text: 'Shop the collection today', font: 'worksans', size: 36, color: '#ffffff', enabled: true, weight: 'bold', gapAbove: 100, caps: false, tracking: 0 },
+        other:     { text: 'Limited time only', font: 'worksans', size: 24, color: '#ffffff', enabled: false, weight: 'bold', gapAbove: 100, caps: false, tracking: 0 },
       },
     },
     effects: {
@@ -418,7 +418,7 @@
         for (const k of ['headline', 'subheader', 'other']) {
           if (recipe.text.layers[k]) {
             // recipes/projects saved before weight + spacing existed get the old look (bold, default gap)
-            Object.assign(state.text.layers[k], { weight: 'bold', gapAbove: 100 }, recipe.text.layers[k]);
+            Object.assign(state.text.layers[k], { weight: 'bold', gapAbove: 100, caps: false, tracking: 0 }, recipe.text.layers[k]);
           }
         }
       }
@@ -1774,6 +1774,15 @@
       });
     });
 
+    const capsEl = panel.querySelector('.layer-caps');
+    capsEl.addEventListener('change', () => { l.caps = capsEl.checked; render(); });
+    const trackEl = panel.querySelector('.layer-tracking');
+    trackEl.addEventListener('input', () => {
+      l.tracking = Number(trackEl.value);
+      panel.querySelector('.layer-tracking-val').textContent = `${l.tracking}%`;
+      render();
+    });
+
     const gapEl = panel.querySelector('.layer-gap');
     if (gapEl) {
       gapEl.addEventListener('input', () => {
@@ -1794,6 +1803,10 @@
     panel.querySelector('.layer-color').value = l.color;
     const weight = l.weight || 'bold';
     panel.querySelectorAll('.layer-weight button').forEach((b) => b.classList.toggle('active', b.dataset.val === weight));
+    panel.querySelector('.layer-caps').checked = !!l.caps;
+    const tr = typeof l.tracking === 'number' ? l.tracking : 0;
+    panel.querySelector('.layer-tracking').value = tr;
+    panel.querySelector('.layer-tracking-val').textContent = `${tr}%`;
     const gapEl = panel.querySelector('.layer-gap');
     if (gapEl) {
       const g = typeof l.gapAbove === 'number' ? l.gapAbove : 100;
@@ -2952,8 +2965,42 @@
     return `${weight} ${sizePx}px ${f.css}`;
   }
 
+  // letter spacing ("tracking") as a fraction of the font size, e.g. 0.15
+  function layerTracking(layer) {
+    return typeof layer.tracking === 'number' && layer.tracking > 0 ? layer.tracking / 100 : 0;
+  }
+
+  // width of one line in the current ctx.font, including any letter spacing
+  // (added between characters, not after the last one)
+  function measureLine(line, sizePx, layer) {
+    const w = ctx.measureText(line).width;
+    const t = layerTracking(layer);
+    if (!t) return w;
+    const n = Array.from(line).length;
+    return w + (n > 1 ? (n - 1) * t * sizePx : 0);
+  }
+
+  // draws one line honouring ctx.textAlign; with letter spacing it's drawn
+  // glyph by glyph (canvas letterSpacing isn't available in every browser)
+  function drawLine(line, x, y, sizePx, layer) {
+    const t = layerTracking(layer);
+    if (!t) { ctx.fillText(line, x, y); return; }
+    const total = measureLine(line, sizePx, layer);
+    const align = ctx.textAlign;
+    let cx = x;
+    if (align === 'center') cx = x - total / 2;
+    else if (align === 'right' || align === 'end') cx = x - total;
+    ctx.textAlign = 'left';
+    for (const ch of Array.from(line)) {
+      ctx.fillText(ch, cx, y);
+      cx += ctx.measureText(ch).width + t * sizePx;
+    }
+    ctx.textAlign = align;
+  }
+
   function wrapText(text, maxWidth, sizePx, layer) {
     ctx.font = fontCss(layer, sizePx);
+    if (layer.caps) text = text.toUpperCase();
     const paragraphs = text.split('\n');
     const lines = [];
     for (const para of paragraphs) {
@@ -2962,7 +3009,7 @@
       let current = words[0];
       for (let i = 1; i < words.length; i++) {
         const test = current + ' ' + words[i];
-        if (ctx.measureText(test).width <= maxWidth) {
+        if (measureLine(test, sizePx, layer) <= maxWidth) {
           current = test;
         } else {
           lines.push(current);
@@ -2996,7 +3043,7 @@
       const sizePx = (l.size / 1080) * W; // scale relative to a 1080-wide reference so it's consistent across presets
       const lines = wrapText(l.text, maxWidth, sizePx, l);
       // ctx.font is already set to this layer's font/size by wrapText, above
-      lines.forEach((line) => { maxLineWidth = Math.max(maxLineWidth, ctx.measureText(line).width); });
+      lines.forEach((line) => { maxLineWidth = Math.max(maxLineWidth, measureLine(line, sizePx, l)); });
       const lineHeight = sizePx * lineGapFactor;
       const blockH = lines.length * lineHeight;
       // per-layer "Space above" (subheader/other), as a % of the default gap
@@ -3104,7 +3151,7 @@
       ctx.fillStyle = l.color;
       ctx.textBaseline = 'top';
       l.lines.forEach(line => {
-        ctx.fillText(line, x, y);
+        drawLine(line, x, y, l.sizePx, l);
         y += l.lineHeight;
       });
     });
