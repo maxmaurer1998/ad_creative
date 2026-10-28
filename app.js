@@ -154,9 +154,9 @@
       orientation: 'horizontal', // 'horizontal' | 'vertical' | 'vertical-flipped'
       crossAlign: 50, // 0=top .. 100=bottom, continuous -- the block's position on the cross (non-stacking) axis, only used when orientation is vertical
       layers: {
-        headline:  { text: 'New Season, New Look', font: 'playfair', size: 72, color: '#ffffff' },
-        subheader: { text: 'Shop the collection today', font: 'worksans', size: 36, color: '#ffffff', enabled: true },
-        other:     { text: 'Limited time only', font: 'worksans', size: 24, color: '#ffffff', enabled: false },
+        headline:  { text: 'New Season, New Look', font: 'playfair', size: 72, color: '#ffffff', weight: 'bold' },
+        subheader: { text: 'Shop the collection today', font: 'worksans', size: 36, color: '#ffffff', enabled: true, weight: 'bold', gapAbove: 100 },
+        other:     { text: 'Limited time only', font: 'worksans', size: 24, color: '#ffffff', enabled: false, weight: 'bold', gapAbove: 100 },
       },
     },
     effects: {
@@ -416,7 +416,10 @@
       }
       if (recipe.text.layers) {
         for (const k of ['headline', 'subheader', 'other']) {
-          if (recipe.text.layers[k]) Object.assign(state.text.layers[k], recipe.text.layers[k]);
+          if (recipe.text.layers[k]) {
+            // recipes/projects saved before weight + spacing existed get the old look (bold, default gap)
+            Object.assign(state.text.layers[k], { weight: 'bold', gapAbove: 100 }, recipe.text.layers[k]);
+          }
         }
       }
       if (typeof state.text.layers.subheader.enabled !== 'boolean') state.text.layers.subheader.enabled = true; // pre-subheaderEnabled recipes
@@ -1762,6 +1765,23 @@
       render();
     });
     colorEl.addEventListener('input', () => { l.color = colorEl.value; render(); });
+
+    panel.querySelectorAll('.layer-weight button').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        l.weight = btn.dataset.val;
+        syncLayerPanel(layerKey);
+        render();
+      });
+    });
+
+    const gapEl = panel.querySelector('.layer-gap');
+    if (gapEl) {
+      gapEl.addEventListener('input', () => {
+        l.gapAbove = Number(gapEl.value);
+        panel.querySelector('.layer-gap-val').textContent = `${l.gapAbove}%`;
+        render();
+      });
+    }
   }
 
   function syncLayerPanel(layerKey) {
@@ -1772,6 +1792,14 @@
     panel.querySelector('.layer-size').value = l.size;
     panel.querySelector('.layer-size-val').textContent = `${l.size}px`;
     panel.querySelector('.layer-color').value = l.color;
+    const weight = l.weight || 'bold';
+    panel.querySelectorAll('.layer-weight button').forEach((b) => b.classList.toggle('active', b.dataset.val === weight));
+    const gapEl = panel.querySelector('.layer-gap');
+    if (gapEl) {
+      const g = typeof l.gapAbove === 'number' ? l.gapAbove : 100;
+      gapEl.value = g;
+      panel.querySelector('.layer-gap-val').textContent = `${g}%`;
+    }
   }
 
   // ---------- preset / canvas sizing ----------
@@ -2916,9 +2944,8 @@
 
   function fontCss(layer, sizePx) {
     const f = FONTS.find(f => f.id === layer.font) || FONTS[0];
-    // only free text boxes carry a `weight` field -- the headline/
-    // subheader/other layers never do, so this always falls through to
-    // the font's normal (bold) weight for them
+    // `weight` is 'bold' | 'regular' | 'light' -- set on free text boxes and
+    // on the headline/subheader/other layers; missing means bold
     let weight = f.weight;
     if (layer.weight === 'regular') weight = f.weightRegular || 400;
     else if (layer.weight === 'light') weight = f.weightLight || 300;
@@ -2972,9 +2999,11 @@
       lines.forEach((line) => { maxLineWidth = Math.max(maxLineWidth, ctx.measureText(line).width); });
       const lineHeight = sizePx * lineGapFactor;
       const blockH = lines.length * lineHeight;
-      built.push({ ...l, sizePx, lines, lineHeight, blockH });
-      totalHeight += blockH;
-      if (idx < layers.length - 1) totalHeight += layerGap;
+      // per-layer "Space above" (subheader/other), as a % of the default gap
+      const gapPct = typeof l.gapAbove === 'number' ? l.gapAbove : 100;
+      const gapBefore = idx === 0 ? 0 : layerGap * (gapPct / 100);
+      built.push({ ...l, sizePx, lines, lineHeight, blockH, gapBefore });
+      totalHeight += gapBefore + blockH;
     });
 
     return { built, totalHeight, margin, maxWidth, layerGap, maxLineWidth };
@@ -3068,9 +3097,9 @@
     }
 
     let y = startY;
-    const layerGap = effH * 0.015;
 
-    built.forEach((l, idx) => {
+    built.forEach((l) => {
+      y += l.gapBefore;
       ctx.font = fontCss(l, l.sizePx);
       ctx.fillStyle = l.color;
       ctx.textBaseline = 'top';
@@ -3078,7 +3107,6 @@
         ctx.fillText(line, x, y);
         y += l.lineHeight;
       });
-      if (idx < built.length - 1) y += layerGap;
     });
     ctx.restore();
 
