@@ -1,10 +1,11 @@
-const CACHE_NAME = 'ad-creative-v10';
+const CACHE_NAME = 'ad-creative-v11';
 
 const PRECACHE_URLS = [
   './',
   './index.html',
   './styles.css',
   './app.js',
+  './enhance.js',
   './manifest.webmanifest',
   './fonts/fonts.css',
   './fonts/inter-300.ttf',
@@ -40,7 +41,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+      Promise.all(keys.filter((k) => k !== CACHE_NAME && !k.startsWith('ad-creative-models')).map((k) => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
@@ -60,6 +61,8 @@ function isCoreAppFile(request, url) {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
+  // the AI model has its own cache, managed by enhance.js
+  if (url.pathname.endsWith('.onnx')) return;
 
   if (isCoreAppFile(event.request, url)) {
     event.respondWith(

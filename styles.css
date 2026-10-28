@@ -637,3 +637,8 @@ input[type="checkbox"] {
   .upload-tile:hover { border-color: var(--accent); color: var(--text); }
   .eyedropper-btn:hover:not(.active) { border-color: var(--accent); color: var(--text); }
 }
+
+/* Enhance tab progress bar */
+.enhance-progress { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; margin: 4px 0 2px; }
+.enhance-progress-bar { height: 100%; width: 0%; background: var(--accent, #2563eb); transition: width .2s ease; }
+#panel-enhance [hidden] { display: none !important; }

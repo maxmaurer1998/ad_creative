@@ -623,6 +623,7 @@
 
   function setCurrentPhotoBlob(blob) {
     currentPhotoBlob = blob || null;
+    setTimeout(() => document.dispatchEvent(new CustomEvent('adcreative:photo')), 0);
     resetHistory(); // a new photo (upload or opened project) starts a fresh undo history
     if (blob) idbSet(IDB_STORE_KV, 'photoBlob', blob);
     else idbDelete(IDB_STORE_KV, 'photoBlob');
@@ -4895,6 +4896,28 @@
   }
 
   exportBtn.addEventListener('click', exportImage);
+
+  // ---------- small API for enhance.js (AI upscaling) ----------
+  // Swaps the working photo for a new one of the same picture (an enhanced
+  // copy), keeping the current pan/zoom/rotation since those are stored as
+  // fractions of the photo, not pixels.
+  window.adCreative = {
+    getPhoto: () => state.image,
+    getPhotoBlob: () => currentPhotoBlob,
+    replacePhoto: (blob) => new Promise((resolve) => {
+      loadImageFromBlob(blob).then((img) => {
+        if (!img) { resolve(false); return; }
+        const keepTransform = { ...state.imageTransform };
+        state.image = img;
+        setCurrentPhotoBlob(blob);
+        state.imageTransform = keepTransform;
+        render();
+        document.dispatchEvent(new CustomEvent('adcreative:photo'));
+        resolve(true);
+      });
+    }),
+  };
+
 
   // ---------- Ken Burns video export (Position tab: pan/zoom between two keyframes) ----------
 

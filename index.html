@@ -66,6 +66,7 @@
     <button class="tab-btn" data-panel="panel-magnifier">Magnifier</button>
     <button class="tab-btn" data-panel="panel-freetext">Text Box</button>
     <button class="tab-btn" data-panel="panel-effects">Effects</button>
+    <button class="tab-btn" data-panel="panel-enhance">Enhance</button>
   </nav>
 
   <section class="panels" id="panels">
@@ -833,6 +834,53 @@
       <p class="hint-text">"Frontier" is a warm, sun-baked vintage-western advertising look: golden-hour white balance, punched-up reds with muted olive greens and grey-teal blues, a faded-matte tone curve, a brown-shadow/cream-highlight split tone, red-orange halation off the highlights, warm grain, and a soft dust haze drifting down from the top.</p>
     </div>
 
+
+    <!-- ENHANCE PANEL (AI upscaling, runs on this device) -->
+    <div class="panel" id="panel-enhance">
+      <p class="hint-text">Sharpens and enlarges the photo with an AI upscaler (Real-ESRGAN) that runs on this device. Nothing is uploaded. Text, fade and logo settings stay as they are.</p>
+      <div class="control-row">
+        <label>Preset</label>
+        <div class="segmented" id="enhancePreset">
+          <button data-val="natural" class="active">Natural</button>
+          <button data-val="balanced">Balanced</button>
+          <button data-val="crisp">Crisp</button>
+        </div>
+      </div>
+      <p class="hint-text">Natural keeps the most real texture (leather grain, shearling fibres) and is best for product photos. Crisp cleans hardest and can look smooth or plastic.</p>
+      <div class="control-row">
+        <label for="enhanceDenoise">Denoise <span id="enhanceDenoiseVal">12%</span></label>
+        <input type="range" id="enhanceDenoise" min="0" max="100" value="12" />
+      </div>
+      <div class="range-scale-labels"><span>Keep texture</span><span>Smooth</span></div>
+      <div class="control-row">
+        <label for="enhanceBlend">Blend with original <span id="enhanceBlendVal">35%</span></label>
+        <input type="range" id="enhanceBlend" min="0" max="80" value="35" />
+      </div>
+      <p class="hint-text">Mixes some of the original back in. More looks more like the real photo; less is sharper.</p>
+      <div class="control-row">
+        <label for="enhanceGrain">Grain <span id="enhanceGrainVal">1.5</span></label>
+        <input type="range" id="enhanceGrain" min="0" max="60" value="15" />
+      </div>
+      <div class="control-row">
+        <label>Output size</label>
+        <div class="segmented" id="enhanceScale">
+          <button data-val="2" class="active">2× (from 4×)</button>
+          <button data-val="4">4×</button>
+        </div>
+      </div>
+      <p class="hint-text" id="enhanceSizeHint">Load a photo to see the output size.</p>
+      <div class="control-row">
+        <button id="enhanceRunBtn" class="btn btn-primary" disabled>Enhance photo</button>
+        <button id="enhanceCancelBtn" class="btn btn-secondary" hidden>Cancel</button>
+      </div>
+      <div class="enhance-progress" id="enhanceProgress" hidden><div class="enhance-progress-bar" id="enhanceProgressBar"></div></div>
+      <p class="hint-text" id="enhanceStatus"></p>
+      <div class="control-row" id="enhanceAfterRow" hidden>
+        <button id="enhanceRevertBtn" class="btn btn-secondary">Back to original photo</button>
+        <button id="enhanceDownloadBtn" class="btn btn-secondary">Save enhanced image</button>
+      </div>
+      <p class="hint-text">Takes from a few seconds to a few minutes depending on the photo and device. Keep this tab open while it runs. Phones are fastest in a browser with WebGPU.</p>
+    </div>
   </section>
  </div>
 </div>
@@ -856,5 +904,6 @@
 </div>
 
 <script src="app.js"></script>
+<script src="enhance.js"></script>
 </body>
 </html>
