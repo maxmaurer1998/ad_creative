@@ -480,7 +480,96 @@
       idbSet(IDB_STORE_KV, 'recipe', serializeRecipe());
       idbSet(IDB_STORE_KV, 'imageTransform', state.imageTransform);
     }, 400);
+    scheduleHistorySnapshot();
   }
+
+  // ---------- undo / redo ----------
+  // Every render schedules a snapshot of the design (everything a recipe holds,
+  // plus the photo's pan/zoom/rotation). A burst of changes -- dragging a slider
+  // or typing -- settles into one step after a short pause. Photos, logos and
+  // detail images aren't part of a step: undo changes settings, not uploads,
+  // and loading a new photo or opening a project starts a fresh history.
+  const HISTORY_LIMIT = 100;
+  const HISTORY_SETTLE_MS = 450;
+  let designHistory = [];
+  let historyIndex = -1;
+  let historyTimer = null;
+  let restoringHistory = false;
+  const undoBtn = document.getElementById('undoBtn');
+  const redoBtn = document.getElementById('redoBtn');
+
+  function designSnapshot() {
+    return JSON.stringify({ recipe: serializeRecipe(), imageTransform: state.imageTransform });
+  }
+
+  function updateHistoryButtons() {
+    undoBtn.disabled = historyIndex <= 0;
+    redoBtn.disabled = historyIndex >= designHistory.length - 1;
+  }
+
+  function recordHistoryNow() {
+    clearTimeout(historyTimer);
+    historyTimer = null;
+    if (restoringHistory) return;
+    const snap = designSnapshot();
+    if (designHistory[historyIndex] === snap) return;
+    designHistory = designHistory.slice(0, historyIndex + 1);
+    designHistory.push(snap);
+    if (designHistory.length > HISTORY_LIMIT) designHistory.shift();
+    historyIndex = designHistory.length - 1;
+    updateHistoryButtons();
+  }
+
+  function scheduleHistorySnapshot() {
+    if (restoringHistory) return;
+    clearTimeout(historyTimer);
+    historyTimer = setTimeout(recordHistoryNow, HISTORY_SETTLE_MS);
+  }
+
+  function resetHistory() {
+    clearTimeout(historyTimer);
+    historyTimer = null;
+    designHistory = [];
+    historyIndex = -1;
+    updateHistoryButtons();
+    scheduleHistorySnapshot(); // the state once things settle becomes the first step
+  }
+
+  function restoreHistory(index) {
+    if (index < 0 || index >= designHistory.length) return;
+    const snap = JSON.parse(designHistory[index]);
+    restoringHistory = true;
+    try {
+      applyRecipeToState(snap.recipe);
+      state.imageTransform = { ...snap.imageTransform };
+      syncAllControlsFromState();
+      applyPreset(state.preset); // re-renders at the right canvas size
+    } finally {
+      restoringHistory = false;
+    }
+    historyIndex = index;
+    designHistory[index] = designSnapshot(); // keep the step identical to what is now on screen
+    updateHistoryButtons();
+  }
+
+  function undo() {
+    if (historyTimer) recordHistoryNow(); // a change still settling is the step to undo
+    restoreHistory(historyIndex - 1);
+  }
+  function redo() { restoreHistory(historyIndex + 1); }
+
+  undoBtn.addEventListener('click', undo);
+  redoBtn.addEventListener('click', redo);
+  document.addEventListener('keydown', (e) => {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+    const key = e.key.toLowerCase();
+    if (key !== 'z' && key !== 'y') return;
+    // leave text fields their own undo while typing in them
+    const t = e.target;
+    if (t && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && /^(text|search|url|email|number)$/i.test(t.type)) || t.isContentEditable)) return;
+    e.preventDefault();
+    if (key === 'y' || e.shiftKey) redo(); else undo();
+  });
 
   function loadImageFromBlob(blob) {
     return new Promise((resolve) => {
@@ -534,6 +623,7 @@
 
   function setCurrentPhotoBlob(blob) {
     currentPhotoBlob = blob || null;
+    resetHistory(); // a new photo (upload or opened project) starts a fresh undo history
     if (blob) idbSet(IDB_STORE_KV, 'photoBlob', blob);
     else idbDelete(IDB_STORE_KV, 'photoBlob');
   }

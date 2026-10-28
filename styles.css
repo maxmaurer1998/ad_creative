@@ -62,6 +62,9 @@ html, body {
   gap: 8px;
 }
 
+.btn-icon { padding: 8px 10px; }
+.btn-icon:disabled { opacity: .35; cursor: default; }
+
 .topbar h1 {
   font-size: 17px;
   font-weight: 600;
