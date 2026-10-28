@@ -837,7 +837,7 @@
 
     <!-- ENHANCE PANEL (AI upscaling, runs on this device) -->
     <div class="panel" id="panel-enhance">
-      <p class="hint-text">Sharpens and enlarges the photo with an AI upscaler (Real-ESRGAN) that runs on this device. Nothing is uploaded. Text, fade and logo settings stay as they are.</p>
+      <p class="hint-text">Sharpens and enlarges the photo with an AI upscaler (Real-ESRGAN) that runs on this device. Nothing is uploaded. Text, logo and fade are hidden while this tab is open and come back when you leave it.</p>
       <div class="control-row">
         <label>Preset</label>
         <div class="segmented" id="enhancePreset">
@@ -877,8 +877,11 @@
       <p class="hint-text" id="enhanceStatus"></p>
       <div class="control-row" id="enhanceAfterRow" hidden>
         <button id="enhanceRevertBtn" class="btn btn-secondary">Back to original photo</button>
-        <button id="enhanceDownloadBtn" class="btn btn-secondary">Save enhanced image</button>
       </div>
+      <div class="control-row">
+        <button id="enhanceDownloadBtn" class="btn btn-secondary" disabled>Export photo</button>
+      </div>
+      <p class="hint-text">Saves just the photo at full size, without text, logo or fade, so you can zoom in and check it. On a phone, choose "Save Image" to put it in Photos.</p>
       <p class="hint-text">Takes from a few seconds to a few minutes depending on the photo and device. Keep this tab open while it runs. Phones are fastest in a browser with WebGPU.</p>
     </div>
   </section>

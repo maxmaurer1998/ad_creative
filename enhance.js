@@ -106,6 +106,7 @@
   function updateSizeHint() {
     const p = plan();
     els.run.disabled = !p || running;
+    els.download.disabled = !p || running || !(window.adCreative && window.adCreative.getPhotoBlob());
     if (!p) { els.sizeHint.textContent = 'Load a photo to see the output size.'; return; }
     const mp = (p.outW * p.outH / 1e6).toFixed(1);
     let t = `${p.w}×${p.h} → ${p.outW}×${p.outH} (${mp} MP).`;
@@ -327,11 +328,23 @@
     els.afterRow.hidden = true;
     setStatus('Back to the original photo.');
   });
-  els.download.addEventListener('click', () => {
-    if (!enhancedBlob) return;
+  // Export photo: the current photo on its own (enhanced or not), full size.
+  // On phones this opens the share sheet so "Save Image" puts it in Photos.
+  els.download.addEventListener('click', async () => {
+    const blob = window.adCreative && window.adCreative.getPhotoBlob();
+    if (!blob) return;
+    const isEnhanced = blob === enhancedBlob;
+    const ext = (blob.type || '').includes('png') ? 'png' : 'jpg';
+    const name = `${isEnhanced ? 'enhanced' : 'photo'}-${Date.now()}.${ext}`;
+    const file = new File([blob], name, { type: blob.type || 'image/jpeg' });
+    const touch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    if (touch && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: name }); return; }
+      catch (e) { if (e && e.name === 'AbortError') return; /* else fall back to a download */ }
+    }
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(enhancedBlob);
-    a.download = `enhanced-${Date.now()}.jpg`;
+    a.href = URL.createObjectURL(file);
+    a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   });
