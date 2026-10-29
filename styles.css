@@ -688,3 +688,10 @@ input[type="checkbox"] {
 .nudge-pad .nudge-down { grid-column: 2; grid-row: 2; }
 .nudge-pad .nudge-right { grid-column: 3; grid-row: 2; }
 .nudge-row { align-items: center; }
+
+/* "‹ Folder" back button (top-left, while a saved design is open) */
+.back-to-folder { display: inline-flex; align-items: center; gap: 2px; padding: 6px 10px 6px 6px; max-width: 34vw; flex-shrink: 1; min-width: 0; }
+.back-to-folder[hidden] { display: none; }
+.back-to-folder svg { flex-shrink: 0; }
+.back-to-folder-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+body.has-back-to-folder .topbar h1 { display: none; }

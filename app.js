@@ -612,6 +612,7 @@
 
   function setCurrentProject(project) {
     currentProject = project;
+    updateBackToFolder();
     if (project) idbSet(IDB_STORE_KV, 'currentProject', project);
     else idbDelete(IDB_STORE_KV, 'currentProject');
     updateSaveButtonLabel();
@@ -651,7 +652,7 @@
       idbGet(IDB_STORE_KV, 'detailBlob0'),
       idbGet(IDB_STORE_KV, 'detailBlob1'),
     ]);
-    if (savedCurrentProject) { currentProject = savedCurrentProject; updateSaveButtonLabel(); }
+    if (savedCurrentProject) { currentProject = savedCurrentProject; updateSaveButtonLabel(); updateBackToFolder(); }
 
     if (recipe) applyRecipeToState(recipe);
 
@@ -1781,6 +1782,37 @@
     }
   }
 
+  // "‹ Folder" in the top-left while a saved design is open: reopens the
+  // Library inside the folder that design lives in (Library itself starts at Home)
+  async function folderTrail(folderId) {
+    const trail = [];
+    for (let id = folderId, guard = 0; id && guard < 50; guard++) {
+      const f = await idbGet(IDB_STORE_FOLDERS, id);
+      if (!f) break;
+      trail.unshift({ id: f.id, name: f.name });
+      id = f.parentId;
+    }
+    return trail;
+  }
+  async function updateBackToFolder() {
+    const btn = document.getElementById('backToFolderBtn');
+    if (!btn) return;
+    const show = !!currentProject;
+    btn.hidden = !show;
+    document.body.classList.toggle('has-back-to-folder', show);
+    if (!show) return;
+    const trail = currentProject.folderId ? await folderTrail(currentProject.folderId) : [];
+    btn.querySelector('.back-to-folder-name').textContent = trail.length ? trail[trail.length - 1].name : 'Library';
+  }
+  async function openLibraryAtProjectFolder() {
+    const trail = currentProject && currentProject.folderId ? await folderTrail(currentProject.folderId) : [];
+    libraryPath = trail;
+    libraryCurrentFolderId = trail.length ? trail[trail.length - 1].id : null;
+    libraryOverlay.classList.remove('hidden');
+    renderLibrary();
+    if (cloud.token && Date.now() - cloud.lastSync > 15000) cloudSync('open');
+  }
+
   function openLibrary() {
     libraryCurrentFolderId = null;
     libraryPath = [];
@@ -1795,6 +1827,7 @@
   }
 
   document.getElementById('libraryBtn').addEventListener('click', openLibrary);
+  document.getElementById('backToFolderBtn').addEventListener('click', openLibraryAtProjectFolder);
   document.getElementById('libraryCloseBtn').addEventListener('click', closeLibrary);
   document.getElementById('libraryBackBtn').addEventListener('click', () => {
     if (libraryPath.length === 0) return;
