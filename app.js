@@ -205,6 +205,9 @@
 
   const IDB_NAME = 'adcreative-db';
   const IDB_VERSION = 3;
+  // preview-only alignment grid toggle (declared early: render() runs during start-up)
+  let showGrid = false;
+  try { showGrid = localStorage.getItem('adCreativeGrid') === '1'; } catch (e) { /* no storage */ }
   const IDB_STORE_KV = 'kv';             // session state: recipe / photoBlob / logoBlob / savedLogo / imageTransform / detailBlob0 / detailBlob1
   const IDB_STORE_RECIPES = 'recipes';   // named recipe templates, keyed by name
   const IDB_STORE_FOLDERS = 'folders';   // { id, parentId, name, createdAt }
@@ -2283,6 +2286,62 @@
     if (btn.dataset.val === 'h') state.imageTransform.flipH = !state.imageTransform.flipH;
     else state.imageTransform.flipV = !state.imageTransform.flipV;
     btn.classList.toggle('active');
+    render();
+  });
+
+  // ---------- precise photo nudging (arrow buttons / keys) ----------
+  // moves the photo by N pixels *of the exported canvas*, in the direction it
+  // appears on screen (same maths as dragging, so it works when rotated/flipped)
+  let nudgeStepPx = 5;
+  function nudgePhoto(dxCanvas, dyCanvas) {
+    if (!state.image) return;
+    const t = state.imageTransform;
+    const totalRad = ((t.rotation || 0) + (t.fineRotation || 0)) * Math.PI / 180;
+    const cos = Math.cos(totalRad), sin = Math.sin(totalRad);
+    let du = dxCanvas * cos + dyCanvas * sin;
+    let dv = -dxCanvas * sin + dyCanvas * cos;
+    if (t.flipH) du = -du;
+    if (t.flipV) dv = -dv;
+    const scale = coverScaleFor(state.image, state.canvasW, state.canvasH) * t.zoom;
+    const c = clampImageOffset(t.offsetXPct - du / (state.image.naturalWidth * scale),
+      t.offsetYPct - dv / (state.image.naturalHeight * scale), t.zoom, state.image, state.canvasW, state.canvasH);
+    t.offsetXPct = c.offsetXPct;
+    t.offsetYPct = c.offsetYPct;
+    render();
+  }
+  document.getElementById('nudgeStep').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    nudgeStepPx = +b.dataset.val;
+    [...e.currentTarget.querySelectorAll('button')].forEach((x) => x.classList.toggle('active', x === b));
+  });
+  // tap = one step; hold = repeat (after a short pause, like a keyboard)
+  document.querySelectorAll('#nudgePad button').forEach((btn) => {
+    let delayTimer = null, repeatTimer = null;
+    const step = () => nudgePhoto(+btn.dataset.dx * nudgeStepPx, +btn.dataset.dy * nudgeStepPx);
+    const stop = () => { clearTimeout(delayTimer); clearInterval(repeatTimer); delayTimer = repeatTimer = null; };
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      step();
+      delayTimer = setTimeout(() => { repeatTimer = setInterval(step, 60); }, 350);
+    });
+    ['pointerup', 'pointerleave', 'pointercancel', 'blur'].forEach((ev) => btn.addEventListener(ev, stop));
+    btn.addEventListener('contextmenu', (e) => e.preventDefault());
+  });
+  document.addEventListener('keydown', (e) => {
+    if (!state.positionEditMode || !e.key.startsWith('Arrow')) return;
+    const tag = (e.target && e.target.tagName) || '';
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag) && e.target.type !== 'checkbox') return;
+    const n = e.shiftKey ? 25 : nudgeStepPx;
+    const d = { ArrowLeft: [-n, 0], ArrowRight: [n, 0], ArrowUp: [0, -n], ArrowDown: [0, n] }[e.key];
+    if (!d) return;
+    e.preventDefault();
+    nudgePhoto(d[0], d[1]);
+  });
+  const gridToggle = document.getElementById('gridToggle');
+  gridToggle.checked = showGrid;
+  gridToggle.addEventListener('change', () => {
+    showGrid = gridToggle.checked;
+    try { localStorage.setItem('adCreativeGrid', showGrid ? '1' : '0'); } catch (e) { /* no storage */ }
     render();
   });
 
@@ -4556,6 +4615,31 @@
 
   // ---------- safe zone overlay ----------
 
+  // alignment grid (preview only): red centre lines, 10% lines, faint 5% lines
+  function drawGrid(W, H) {
+    if (!showGrid) return;
+    const lw = Math.max(1, Math.round(Math.min(W, H) / 540));
+    ctx.save();
+    const line = (x1, y1, x2, y2) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
+    for (let i = 1; i < 20; i++) {
+      if (i === 10) continue;
+      const major = i % 2 === 0;
+      ctx.lineWidth = lw;
+      ctx.strokeStyle = major ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.22)';
+      const x = Math.round(W * i / 20) + 0.5, y = Math.round(H * i / 20) + 0.5;
+      // dark underline so lines show on white photos too
+      ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 0; ctx.shadowOffsetX = lw; ctx.shadowOffsetY = lw;
+      line(x, 0, x, H);
+      line(0, y, W, y);
+    }
+    ctx.shadowColor = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = lw * 2;
+    ctx.strokeStyle = 'rgba(255,59,59,0.95)';
+    line(Math.round(W / 2), 0, Math.round(W / 2), H);
+    line(0, Math.round(H / 2), W, Math.round(H / 2));
+    ctx.restore();
+  }
+
   function drawSafeZone(W, H) {
     if (!(state.preset === '1080x1920' && state.safeZone)) return;
     ctx.fillStyle = 'rgba(120,120,130,0.45)';
@@ -4606,6 +4690,7 @@
       drawDragGuides(W, H);
       drawSmartGuides(W, H);
       drawSafeZone(W, H);
+      drawGrid(W, H);
       drawMagnifierEditingAids(W, H, magnifierResults, textBounds);
       drawFreeTextEditingAids(W, H, freeTextResults);
     }

@@ -153,6 +153,29 @@
           <button type="button" data-val="v">Vertical</button>
         </div>
       </div>
+      <div class="control-row nudge-row">
+        <label>Move photo</label>
+        <div class="nudge-pad" id="nudgePad">
+          <button type="button" class="btn btn-secondary nudge-up" data-dx="0" data-dy="-1" aria-label="Move photo up">↑</button>
+          <button type="button" class="btn btn-secondary nudge-left" data-dx="-1" data-dy="0" aria-label="Move photo left">←</button>
+          <button type="button" class="btn btn-secondary nudge-right" data-dx="1" data-dy="0" aria-label="Move photo right">→</button>
+          <button type="button" class="btn btn-secondary nudge-down" data-dx="0" data-dy="1" aria-label="Move photo down">↓</button>
+        </div>
+      </div>
+      <div class="control-row">
+        <label>Step</label>
+        <div class="segmented" id="nudgeStep">
+          <button type="button" data-val="1">1 px</button>
+          <button type="button" data-val="5" class="active">5 px</button>
+          <button type="button" data-val="25">25 px</button>
+        </div>
+      </div>
+      <p class="hint-text">Moves the photo by that many pixels of the exported image. Hold an arrow to keep moving. On a keyboard, arrow keys do the same (Shift = 25 px).</p>
+      <div class="control-row">
+        <label for="gridToggle">Grid lines</label>
+        <input type="checkbox" id="gridToggle" />
+      </div>
+      <p class="hint-text">Shows a grid on the preview only (never in exports): red centre lines, plus lines every 10% and fainter ones every 5%.</p>
       <div class="control-row">
         <button id="resetImagePositionBtn" class="btn btn-secondary">Reset position</button>
       </div>
