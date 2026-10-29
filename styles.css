@@ -661,3 +661,12 @@ input[type="checkbox"] {
 }
 .library-row-menu button:hover, .library-row-menu button:focus-visible { background: var(--panel-bg-2); }
 .library-row-menu button.danger { color: #ff6b6b; }
+
+/* export: "ready -> tap to save/share" sheet (keeps the share inside a fresh tap on iPhone) */
+.export-sheet { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.55); display: flex; align-items: flex-end; justify-content: center; padding: 16px 16px calc(16px + var(--safe-bottom, 0px)); }
+.export-sheet[hidden] { display: none; }
+.export-sheet-card { width: 100%; max-width: 420px; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+.export-sheet-title { margin: 0; font-size: 16px; font-weight: 700; color: var(--text); }
+.export-sheet-sub { margin: 0 0 4px; font-size: 13px; color: var(--text-dim); line-height: 1.4; word-break: break-word; }
+.export-sheet-card .btn { width: 100%; }
+.export-sheet-go[hidden] { display: none; }
