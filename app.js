@@ -1348,7 +1348,10 @@
     return new Date(t).toLocaleDateString();
   }
 
+  const APP_VERSION = 'v20';
   function renderCloudBar() {
+    const ver = document.getElementById('appVersion');
+    if (ver) ver.textContent = `Ad Creative ${APP_VERSION}`;
     const bar = document.getElementById('cloudBar');
     if (!bar) return;
     if (!cloud.token) {
@@ -2331,6 +2334,29 @@
     setImageZoom(Number(imageZoom.value) / 100);
     imageZoomVal.textContent = `${imageZoom.value}%`;
     render();
+  });
+
+  // − / + : zoom 1% at a time (hold to repeat), for precise framing
+  function stepZoom(dir) {
+    if (!state.image) return;
+    const cur = Math.round((state.imageTransform.zoom || 1) * 100);
+    const next = Math.min(400, Math.max(50, cur + dir));
+    if (next === cur) return;
+    imageZoom.value = next;
+    setImageZoom(next / 100);
+    imageZoomVal.textContent = `${next}%`;
+    render();
+  }
+  document.querySelectorAll('.zoom-step').forEach((btn) => {
+    let delayTimer = null, repeatTimer = null;
+    const stop = () => { clearTimeout(delayTimer); clearInterval(repeatTimer); delayTimer = repeatTimer = null; };
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      stepZoom(+btn.dataset.dir);
+      delayTimer = setTimeout(() => { repeatTimer = setInterval(() => stepZoom(+btn.dataset.dir), 70); }, 350);
+    });
+    ['pointerup', 'pointerleave', 'pointercancel', 'blur'].forEach((ev) => btn.addEventListener(ev, stop));
+    btn.addEventListener('contextmenu', (e) => e.preventDefault());
   });
 
   document.getElementById('imageRotate').addEventListener('click', (e) => {
