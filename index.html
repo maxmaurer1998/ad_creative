@@ -133,6 +133,11 @@
         <label for="imageZoom">Zoom <span id="imageZoomVal">100%</span></label>
         <input type="range" id="imageZoom" min="50" max="400" value="100" />
       </div>
+      <div class="control-row zoom-step-row">
+        <button type="button" class="btn btn-secondary zoom-step" data-dir="-1" aria-label="Zoom out 1%">−</button>
+        <button type="button" class="btn btn-secondary zoom-step" data-dir="1" aria-label="Zoom in 1%">+</button>
+        <span class="hint-text zoom-step-hint">1% per tap · hold to keep going</span>
+      </div>
       <div class="control-row">
         <label>Rotate photo</label>
         <div class="segmented" id="imageRotate">
@@ -940,6 +945,7 @@
   </div>
   <div id="cloudBar" class="cloud-bar"></div>
   <div id="libraryList" class="library-list"></div>
+  <div class="app-version" id="appVersion"></div>
 </div>
 
 <script src="app.js"></script>
