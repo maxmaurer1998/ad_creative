@@ -679,3 +679,12 @@ input[type="checkbox"] {
 .cloud-badge { font-size: 11px; font-weight: 600; flex-shrink: 0; padding: 2px 6px; border-radius: 6px; }
 .cloud-badge.ok { color: #7bd389; background: rgba(123,211,137,.1); }
 .cloud-badge.pending { color: #f3c969; background: rgba(243,201,105,.1); }
+
+/* photo nudge pad */
+.nudge-pad { display: grid; grid-template-columns: repeat(3, 48px); grid-template-rows: repeat(2, 40px); gap: 6px; margin-left: auto; }
+.nudge-pad .btn { padding: 0; font-size: 18px; line-height: 1; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.nudge-pad .nudge-up { grid-column: 2; grid-row: 1; }
+.nudge-pad .nudge-left { grid-column: 1; grid-row: 2; }
+.nudge-pad .nudge-down { grid-column: 2; grid-row: 2; }
+.nudge-pad .nudge-right { grid-column: 3; grid-row: 2; }
+.nudge-row { align-items: center; }
