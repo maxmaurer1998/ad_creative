@@ -313,6 +313,20 @@
     } catch (e) { return []; }
   }
 
+  // Safari can delete the data behind a Blob it loaded from IndexedDB once the
+  // record it came from is overwritten ("NotFoundError: The object can not be
+  // found here"). Copying stored images into plain in-memory Blobs as soon as
+  // they're loaded, and before they're saved again, avoids that entirely.
+  async function memoryBlob(b) {
+    if (!b) return null;
+    try {
+      return new Blob([await b.arrayBuffer()], { type: b.type || 'application/octet-stream' });
+    } catch (e) {
+      console.warn('stored image could not be read', e);
+      return null;
+    }
+  }
+
   function makeId() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
     return 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -642,7 +656,7 @@
   }
 
   async function restoreSession() {
-    const [recipe, photoBlob, logoBlob, savedLogoBlob, imageTransform, savedCurrentProject, detailBlob0, detailBlob1] = await Promise.all([
+    let [recipe, photoBlob, logoBlob, savedLogoBlob, imageTransform, savedCurrentProject, detailBlob0, detailBlob1] = await Promise.all([
       idbGet(IDB_STORE_KV, 'recipe'),
       idbGet(IDB_STORE_KV, 'photoBlob'),
       idbGet(IDB_STORE_KV, 'logoBlob'),
@@ -653,6 +667,7 @@
       idbGet(IDB_STORE_KV, 'detailBlob1'),
     ]);
     if (savedCurrentProject) { currentProject = savedCurrentProject; updateSaveButtonLabel(); updateBackToFolder(); }
+    [photoBlob, logoBlob, savedLogoBlob, detailBlob0, detailBlob1] = await Promise.all([photoBlob, logoBlob, savedLogoBlob, detailBlob0, detailBlob1].map(memoryBlob));
 
     if (recipe) applyRecipeToState(recipe);
 
@@ -886,6 +901,7 @@
   let libraryRowMenu = null;
   function closeLibraryRowMenu() {
     if (libraryRowMenu) { libraryRowMenu.remove(); libraryRowMenu = null; }
+    if (cloud.rerenderPending) { cloud.rerenderPending = false; setTimeout(renderLibrary, 0); }
   }
   function openLibraryRowMenu(btn) {
     const same = libraryRowMenu && libraryRowMenu.dataset.for === btn.dataset.id;
@@ -1060,7 +1076,11 @@
     cloud.lastSync = Date.now();
     await idbSet(IDB_STORE_KV, 'cloudLastSync', cloud.lastSync);
     cloudSetStatus('idle');
-    if (!libraryOverlay.classList.contains('hidden')) renderLibrary();
+    if (!libraryOverlay.classList.contains('hidden')) {
+      // don't yank the list out from under an open ⋯ menu: redraw once it closes
+      if (libraryRowMenu) cloud.rerenderPending = true;
+      else renderLibrary();
+    }
   }
 
   // returns false if the branch moved while we were working (caller retries)
@@ -1092,6 +1112,7 @@
     const foldersById = new Map(folders.map((f) => [f.id, f]));
     const local = new Map(); // cloudId -> { project, design, hash, blobs: {path: Blob} }
     const claimed = new Set();
+    const repaired = []; // local project ids whose lost images came back from GitHub
     for (const p of projects) {
       const path = sharedPath(p.folderId, foldersById);
       if (!path) continue;
@@ -1099,22 +1120,40 @@
       // a duplicated/imported copy carries someone else's cloud id: give it its own
       if (!cid || (p.cloud.localId && p.cloud.localId !== p.id) || claimed.has(cid)) cid = makeId();
       claimed.add(cid);
-      const images = {}, blobs = {};
+      const images = {}, blobs = {}, broken = [];
       for (const k of CLOUD_BLOB_FIELDS) {
         const b = p[k];
         if (!b) continue;
-        const buf = await b.arrayBuffer();
+        let buf = null;
+        try { buf = await b.arrayBuffer(); } catch (e) { broken.push(k); continue; }
         const key = (await sha256Hex(buf)).slice(0, 32);
         const bp = `blobs/${key}.${extForType(b.type)}`;
         images[k] = bp;
-        blobs[bp] = b;
+        blobs[bp] = new Blob([buf], { type: b.type || 'application/octet-stream' });
       }
+      // an image Safari lost: take it back from the copy on GitHub (same design), if there is one
+      if (broken.length && p.cloud && p.cloud.id === cid && remote.has(cid)) {
+        try {
+          const rb = await gh('GET', `/git/blobs/${remote.get(cid)}`);
+          const rd = JSON.parse(new TextDecoder().decode(base64ToBytes(rb.content)));
+          for (const k of broken) {
+            const bp = rd.images && rd.images[k];
+            const sha = bp && remoteBlobs.get(bp);
+            if (!sha) continue;
+            const ib = await gh('GET', `/git/blobs/${sha}`);
+            images[k] = bp;
+            blobs[bp] = new Blob([base64ToBytes(ib.content)], { type: typeForExt(bp.split('.').pop()) });
+          }
+          repaired.push(p.id);
+        } catch (e) { console.warn('could not repair images for', p.name, e); }
+      }
+      const unrepaired = broken.filter((k) => !images[k]);
       const design = {
         format: 'rue-design', version: 1, id: cid, name: p.name, path,
         updatedAt: p.updatedAt || Date.now(), recipe: p.recipe || null,
         imageTransform: p.imageTransform || null, images,
       };
-      local.set(cid, { project: p, design, hash: await designHash(design), blobs });
+      local.set(cid, { project: p, design, hash: await designHash(design), blobs, unrepaired: unrepaired.length > 0 });
     }
 
     // ---- download remote designs we haven't seen in this exact version
@@ -1133,6 +1172,7 @@
     for (const cid of ids) {
       const L = local.get(cid), R = remoteDesigns.get(cid), K = cloud.known[cid];
       if (L && R) {
+        if (L.unrepaired) { toPull.push(cid); continue; } // local images lost: restore the GitHub copy
         if (L.hash === R.hash) continue;
         if (K && L.hash === K.hash) toPull.push(cid);
         else if (K && R.hash === K.hash) toPush.push(cid);
@@ -1202,7 +1242,7 @@
         for (const k of CLOUD_BLOB_FIELDS) {
           const bp = d.images && d.images[k];
           if (!bp) { rec[k] = null; continue; }
-          if (L && L.blobs[bp]) { rec[k] = L.blobs[bp]; continue; } // already have this exact image
+          if (L && L.blobs[bp]) { rec[k] = L.blobs[bp]; continue; } // already have this exact image (fresh copy)
           const sha = remoteBlobs.get(bp);
           if (!sha) { rec[k] = null; continue; }
           const b = await gh('GET', `/git/blobs/${sha}`);
@@ -1217,11 +1257,23 @@
         await idbDelete(IDB_STORE_PROJECTS, L.project.id);
         if (currentProject && currentProject.id === L.project.id) setCurrentProject(null);
       }
+      // put images recovered from GitHub back into the local records
+      for (const [cid, L] of local) {
+        if (!repaired.includes(L.project.id) || toPull.includes(cid) || delLocal.includes(cid)) continue;
+        const rec = { ...L.project };
+        for (const k of CLOUD_BLOB_FIELDS) {
+          const bp = L.design.images[k];
+          if (bp && L.blobs[bp]) rec[k] = L.blobs[bp];
+        }
+        await idbPut(IDB_STORE_PROJECTS, rec);
+      }
       // stamp cloud ids onto local records that were just uploaded
       for (const cid of toPush) {
         const L = local.get(cid);
         if (!L.project.cloud || L.project.cloud.id !== cid || L.project.cloud.localId !== L.project.id) {
-          await idbPut(IDB_STORE_PROJECTS, { ...L.project, cloud: { id: cid, localId: L.project.id } });
+          const rec = { ...L.project, cloud: { id: cid, localId: L.project.id } };
+          for (const k of CLOUD_BLOB_FIELDS) { const bp = L.design.images[k]; if (bp && L.blobs[bp]) rec[k] = L.blobs[bp]; }
+          await idbPut(IDB_STORE_PROJECTS, rec);
         }
       }
     } finally {
@@ -1644,10 +1696,10 @@
     return {
       recipe: serializeRecipe(),
       imageTransform: { ...state.imageTransform },
-      photoBlob: photoBlob || null,
-      logoBlob,
-      detailBlob0: detailBlobs[0],
-      detailBlob1: detailBlobs[1],
+      photoBlob: (await memoryBlob(photoBlob)) || (state.image ? await imageElementToBlob(state.image) : null),
+      logoBlob: (await memoryBlob(logoBlob)) || (state.logo.img ? await imageElementToBlob(state.logo.img) : null),
+      detailBlob0: await memoryBlob(detailBlobs[0]),
+      detailBlob1: await memoryBlob(detailBlobs[1]),
       thumbnailBlob,
       updatedAt: Date.now(),
     };
@@ -1713,6 +1765,7 @@
     try {
       const project = await idbGet(IDB_STORE_PROJECTS, id);
       if (!project) { alert("Couldn't find that project — it may have been deleted."); return; }
+      for (const k of ['photoBlob', 'logoBlob', 'detailBlob0', 'detailBlob1']) project[k] = await memoryBlob(project[k]);
 
       if (project.photoBlob) {
         const img = await loadImageFromBlob(project.photoBlob);

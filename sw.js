@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ad-creative-v18';
+const CACHE_NAME = 'ad-creative-v19';
 
 const PRECACHE_URLS = [
   './',
