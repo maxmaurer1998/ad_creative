@@ -644,3 +644,20 @@ input[type="checkbox"] {
 #panel-enhance [hidden] { display: none !important; }
 .enhance-presets button { flex: 1 1 30%; }
 .enhance-presets button:last-child:nth-child(odd) { flex-basis: 30%; }
+
+/* ⋯ menu on library rows */
+.library-row { position: relative; }
+.library-row-more { font-size: 18px; line-height: 1; padding: 4px 12px 8px; letter-spacing: 1px; }
+.library-row-menu {
+  position: absolute; right: 0; top: calc(100% - 6px); z-index: 20;
+  min-width: 160px; padding: 6px;
+  background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0,0,0,.35);
+  display: flex; flex-direction: column;
+}
+.library-row-menu button {
+  background: none; border: 0; color: var(--text); text-align: left;
+  font-size: 14px; font-weight: 600; padding: 10px 12px; border-radius: 7px; cursor: pointer;
+}
+.library-row-menu button:hover, .library-row-menu button:focus-visible { background: var(--panel-bg-2); }
+.library-row-menu button.danger { color: #ff6b6b; }
