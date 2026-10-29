@@ -835,9 +835,7 @@
       row.innerHTML = `
         <span class="library-row-icon">📁</span>
         <span class="library-row-name" role="button">${escapeHtml(folder.name)}</span>
-        <button class="library-row-btn" data-action="export-folder" data-id="${folder.id}">Export</button>
-        <button class="library-row-btn" data-action="rename-folder" data-id="${folder.id}">Rename</button>
-        <button class="library-row-btn" data-action="delete-folder" data-id="${folder.id}">Delete</button>
+        <button class="library-row-btn library-row-more" data-kind="folder" data-id="${folder.id}" aria-label="More options for ${escapeHtml(folder.name)}">⋯</button>
       `;
       row.querySelector('.library-row-name').addEventListener('click', () => {
         libraryPath.push({ id: folder.id, name: folder.name });
@@ -859,18 +857,52 @@
       row.innerHTML = `
         ${thumbHtml}
         <span class="library-row-name" role="button">${escapeHtml(project.name)}</span>
-        <button class="library-row-btn" data-action="rename-project" data-id="${project.id}">Rename</button>
-        <button class="library-row-btn" data-action="duplicate-project" data-id="${project.id}">Duplicate</button>
-        <button class="library-row-btn" data-action="delete-project" data-id="${project.id}">Delete</button>
+        <button class="library-row-btn library-row-more" data-kind="project" data-id="${project.id}" aria-label="More options for ${escapeHtml(project.name)}">⋯</button>
       `;
       row.querySelector('.library-row-name').addEventListener('click', () => openProject(project.id));
       libraryList.appendChild(row);
     }
 
-    libraryList.querySelectorAll('.library-row-btn').forEach((btn) => {
-      btn.addEventListener('click', () => handleLibraryRowAction(btn.dataset.action, btn.dataset.id));
+    libraryList.querySelectorAll('.library-row-more').forEach((btn) => {
+      btn.addEventListener('click', (e) => { e.stopPropagation(); openLibraryRowMenu(btn); });
     });
   }
+
+  // ---------- the ⋯ menu on each library row ----------
+  const LIBRARY_ROW_MENUS = {
+    folder: [['export-folder', 'Export JSON'], ['rename-folder', 'Rename'], ['delete-folder', 'Delete']],
+    project: [['export-project', 'Export JSON'], ['rename-project', 'Rename'], ['duplicate-project', 'Duplicate'], ['delete-project', 'Delete']],
+  };
+  let libraryRowMenu = null;
+  function closeLibraryRowMenu() {
+    if (libraryRowMenu) { libraryRowMenu.remove(); libraryRowMenu = null; }
+  }
+  function openLibraryRowMenu(btn) {
+    const same = libraryRowMenu && libraryRowMenu.dataset.for === btn.dataset.id;
+    closeLibraryRowMenu();
+    if (same) return; // second tap on the same ⋯ just closes it
+    const menu = document.createElement('div');
+    menu.className = 'library-row-menu';
+    menu.dataset.for = btn.dataset.id;
+    for (const [action, label] of LIBRARY_ROW_MENUS[btn.dataset.kind]) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.textContent = label;
+      if (action.startsWith('delete')) item.classList.add('danger');
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeLibraryRowMenu();
+        handleLibraryRowAction(action, btn.dataset.id);
+      });
+      menu.appendChild(item);
+    }
+    btn.closest('.library-row').appendChild(menu);
+    libraryRowMenu = menu;
+  }
+  document.addEventListener('click', (e) => {
+    if (libraryRowMenu && !libraryRowMenu.contains(e.target)) closeLibraryRowMenu();
+  });
+  libraryList.addEventListener('scroll', closeLibraryRowMenu, { passive: true });
 
   // ---------- library import / export ----------
   // A bundle is a single JSON file holding folders + projects (with every
@@ -899,14 +931,17 @@
 
   // rootFolderId: the folder to export (its whole subtree), or null for the
   // entire library
-  async function buildLibraryBundle(rootFolderId) {
+  // onlyProjectId: export just that one saved project (no folders)
+  async function buildLibraryBundle(rootFolderId, onlyProjectId = null) {
     const [allFolders, allProjects] = await Promise.all([
       idbGetAllValues(IDB_STORE_FOLDERS),
       idbGetAllValues(IDB_STORE_PROJECTS),
     ]);
     let folders;
     let rootName = 'Library';
-    if (rootFolderId === null) {
+    if (onlyProjectId) {
+      folders = [];
+    } else if (rootFolderId === null) {
       folders = allFolders;
     } else {
       const root = allFolders.find((f) => f.id === rootFolderId);
@@ -918,7 +953,12 @@
       }
     }
     const folderIds = new Set(folders.map((f) => f.id));
-    const projects = allProjects.filter((p) => (rootFolderId === null ? true : folderIds.has(p.folderId)));
+    let projects = allProjects.filter((p) => (rootFolderId === null ? true : folderIds.has(p.folderId)));
+    if (onlyProjectId) {
+      projects = allProjects.filter((p) => p.id === onlyProjectId);
+      if (!projects.length) return null;
+      rootName = projects[0].name || 'Project';
+    }
 
     // identical images (the same photo/logo reused across sizes) are stored
     // once in `blobs` and referenced as "blob:<hash>", which keeps a folder of
@@ -950,13 +990,24 @@
       name: rootName,
       // the exported root's own parent is cut off so it re-attaches wherever it's imported
       folders: folders.map((f) => ({ ...f, parentId: (f.id === rootFolderId) ? null : f.parentId })),
-      projects: outProjects,
+      // a single exported project lands straight in whichever folder it's imported into
+      projects: onlyProjectId ? outProjects.map((p) => ({ ...p, folderId: null })) : outProjects,
     };
+  }
+
+  async function exportLibraryProject(projectId) {
+    const bundle = await buildLibraryBundle(null, projectId);
+    if (!bundle) { alert("Couldn't find that project."); return; }
+    await shareBundle(bundle);
   }
 
   async function exportLibraryFolder(rootFolderId) {
     const bundle = await buildLibraryBundle(rootFolderId);
     if (!bundle) { alert("Couldn't find that folder."); return; }
+    await shareBundle(bundle);
+  }
+
+  async function shareBundle(bundle) {
     if (bundle.projects.length === 0 && bundle.folders.length === 0) { alert('Nothing to export here yet.'); return; }
     const safe = bundle.name.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'library';
     const file = new File([JSON.stringify(bundle)], `${safe}.adcreative.json`, { type: 'application/json' });
@@ -1034,6 +1085,8 @@
   async function handleLibraryRowAction(action, id) {
     if (action === 'export-folder') {
       await exportLibraryFolder(id);
+    } else if (action === 'export-project') {
+      await exportLibraryProject(id);
     } else if (action === 'rename-folder') {
       const folder = await idbGet(IDB_STORE_FOLDERS, id);
       if (!folder) return;
