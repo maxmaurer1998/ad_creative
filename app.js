@@ -996,29 +996,49 @@
   }
 
   async function exportLibraryProject(projectId) {
+    showExportSheet({ title: 'Preparing export…', sub: 'Packing the design and its full-resolution photo.' });
     const bundle = await buildLibraryBundle(null, projectId);
-    if (!bundle) { alert("Couldn't find that project."); return; }
+    if (!bundle) { showExportSheet({ title: "Couldn't find that project." }); return; }
     await shareBundle(bundle);
   }
 
   async function exportLibraryFolder(rootFolderId) {
+    showExportSheet({ title: 'Preparing export…', sub: 'Packing every design and its full-resolution photos. This can take a few seconds.' });
     const bundle = await buildLibraryBundle(rootFolderId);
-    if (!bundle) { alert("Couldn't find that folder."); return; }
+    if (!bundle) { showExportSheet({ title: "Couldn't find that folder." }); return; }
     await shareBundle(bundle);
   }
 
-  async function shareBundle(bundle) {
-    if (bundle.projects.length === 0 && bundle.folders.length === 0) { alert('Nothing to export here yet.'); return; }
-    const safe = bundle.name.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'library';
-    const file = new File([JSON.stringify(bundle)], `${safe}.adcreative.json`, { type: 'application/json' });
-    try {
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: bundle.name });
-        return;
-      }
-    } catch (err) {
-      if (err && err.name === 'AbortError') return;
+  // iPhone Safari only opens the share sheet straight after a tap, and packing
+  // a folder (reading + hashing every photo) takes longer than it allows, so
+  // the share was being silently blocked. Instead: pack first, then show a
+  // "Save / share" button whose own tap opens the share sheet immediately.
+  function showExportSheet(state) {
+    let sheet = document.getElementById('exportSheet');
+    if (!sheet) {
+      sheet = document.createElement('div');
+      sheet.id = 'exportSheet';
+      sheet.className = 'export-sheet';
+      sheet.innerHTML = `
+        <div class="export-sheet-card" role="dialog" aria-modal="true" aria-labelledby="exportSheetTitle">
+          <p class="export-sheet-title" id="exportSheetTitle"></p>
+          <p class="export-sheet-sub"></p>
+          <button type="button" class="btn btn-primary export-sheet-go" hidden>Save / share file</button>
+          <button type="button" class="btn btn-secondary export-sheet-cancel">Cancel</button>
+        </div>`;
+      document.body.appendChild(sheet);
+      sheet.querySelector('.export-sheet-cancel').addEventListener('click', () => { sheet.hidden = true; });
     }
+    sheet.hidden = false;
+    sheet.querySelector('.export-sheet-title').textContent = state.title;
+    sheet.querySelector('.export-sheet-sub').textContent = state.sub || '';
+    const go = sheet.querySelector('.export-sheet-go');
+    go.hidden = !state.onGo;
+    go.onclick = state.onGo || null;
+    return sheet;
+  }
+
+  function downloadFile(file) {
     const url = URL.createObjectURL(file);
     const a = document.createElement('a');
     a.href = url;
@@ -1026,7 +1046,33 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+
+  async function shareBundle(bundle) {
+    if (bundle.projects.length === 0 && bundle.folders.length === 0) { alert('Nothing to export here yet.'); return; }
+    const safe = bundle.name.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'library';
+    const file = new File([JSON.stringify(bundle)], `${safe}.adcreative.json`, { type: 'application/json' });
+    const mb = (file.size / 1048576).toFixed(1);
+    const n = bundle.projects.length;
+    const canShareFile = !!(navigator.canShare && navigator.canShare({ files: [file] }));
+    const sheet = showExportSheet({
+      title: 'Export ready',
+      sub: `${file.name} · ${n} design${n === 1 ? '' : 's'} · ${mb} MB. Full-resolution photos included.`,
+      onGo: async () => {
+        if (canShareFile) {
+          try {
+            await navigator.share({ files: [file], title: bundle.name });
+            sheet.hidden = true;
+            return;
+          } catch (err) {
+            if (err && err.name === 'AbortError') return; // closed the share sheet: keep the button
+          }
+        }
+        downloadFile(file);
+        sheet.hidden = true;
+      },
+    });
   }
 
   // returns { folders, projects } counts imported
