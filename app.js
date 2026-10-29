@@ -259,6 +259,7 @@
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
       });
+      if (store === IDB_STORE_PROJECTS || store === IDB_STORE_FOLDERS) { try { cloudSchedule(); } catch (e) { /* cloud not ready yet */ } }
     } catch (e) { /* ignore */ }
   }
 
@@ -289,6 +290,7 @@
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
       });
+      if (store === IDB_STORE_PROJECTS || store === IDB_STORE_FOLDERS) { try { cloudSchedule(); } catch (e) { /* cloud not ready yet */ } }
       return true;
     } catch (e) {
       console.error(`idbPut(${store}) failed`, e);
@@ -821,6 +823,8 @@
     libraryBreadcrumb.textContent = libraryPath.length ? `Home / ${libraryPath.map((p) => p.name).join(' / ')}` : 'Home';
 
     libraryList.innerHTML = '';
+    renderCloudBar();
+    const inShared = libraryCurrentFolderId === CLOUD_ROOT_ID || (libraryPath[0] && libraryPath[0].id === CLOUD_ROOT_ID);
 
     if (folders.length === 0 && projects.length === 0) {
       const empty = document.createElement('p');
@@ -833,7 +837,7 @@
       const row = document.createElement('div');
       row.className = 'library-row';
       row.innerHTML = `
-        <span class="library-row-icon">📁</span>
+        <span class="library-row-icon">${folder.id === CLOUD_ROOT_ID ? '☁️' : '📁'}</span>
         <span class="library-row-name" role="button">${escapeHtml(folder.name)}</span>
         <button class="library-row-btn library-row-more" data-kind="folder" data-id="${folder.id}" aria-label="More options for ${escapeHtml(folder.name)}">⋯</button>
       `;
@@ -857,6 +861,8 @@
       row.innerHTML = `
         ${thumbHtml}
         <span class="library-row-name" role="button">${escapeHtml(project.name)}</span>
+        ${inShared && cloud.token ? (project.cloud && project.cloud.localId === project.id && cloud.known[project.cloud.id] && (project.updatedAt || 0) <= cloud.lastSync
+          ? '<span class="cloud-badge ok" title="Synced">✓ synced</span>' : '<span class="cloud-badge pending" title="Not synced yet">↑ pending</span>') : ''}
         <button class="library-row-btn library-row-more" data-kind="project" data-id="${project.id}" aria-label="More options for ${escapeHtml(project.name)}">⋯</button>
       `;
       row.querySelector('.library-row-name').addEventListener('click', () => openProject(project.id));
@@ -903,6 +909,413 @@
     if (libraryRowMenu && !libraryRowMenu.contains(e.target)) closeLibraryRowMenu();
   });
   libraryList.addEventListener('scroll', closeLibraryRowMenu, { passive: true });
+
+  // ---------- shared library (cloud sync via a private GitHub repo) ----------
+  // Everything inside the "Shared ☁️" folder is mirrored to a private GitHub
+  // repo, so it can be edited from this phone and by Claude. Repo layout:
+  //   designs/<cloudId>.json   one file per design (settings + image refs)
+  //   blobs/<hash>.<ext>       images, stored once and shared between designs
+  // Each sync is ONE git commit made with the Git Data API, so a dropped
+  // connection can never leave the repo half-written, and if the repo moved on
+  // since we looked (someone else saved), the commit is refused and we retry.
+  // Who changed what is worked out against the state at the last good sync
+  // ("known"): only-local change -> upload, only-remote change -> download,
+  // both -> the newer save wins (the other stays in GitHub's history).
+  const CLOUD_ROOT_ID = 'cloud-shared';
+  const CLOUD_ROOT_NAME = 'Shared ☁️';
+  const CLOUD_DEFAULT_REPO = 'maxmaurer1998/rue-creative-library';
+  const CLOUD_BLOB_FIELDS = ['photoBlob', 'logoBlob', 'detailBlob0', 'detailBlob1', 'thumbnailBlob'];
+  const cloud = {
+    token: null, repo: CLOUD_DEFAULT_REPO, branch: 'main',
+    known: {},           // cloudId -> { hash, sha }  (as of the last good sync)
+    lastSync: 0, status: 'off', message: '', syncing: false, writing: false, timer: null,
+  };
+
+  async function cloudLoadSettings() {
+    const s = (await idbGet(IDB_STORE_KV, 'cloudSettings')) || {};
+    cloud.token = s.token || null;
+    cloud.repo = s.repo || CLOUD_DEFAULT_REPO;
+    cloud.branch = s.branch || 'main';
+    cloud.known = (await idbGet(IDB_STORE_KV, 'cloudKnown')) || {};
+    cloud.lastSync = (await idbGet(IDB_STORE_KV, 'cloudLastSync')) || 0;
+    cloud.status = cloud.token ? 'idle' : 'off';
+  }
+  async function cloudSaveSettings() {
+    await idbSet(IDB_STORE_KV, 'cloudSettings', { token: cloud.token, repo: cloud.repo, branch: cloud.branch });
+  }
+
+  async function gh(method, path, body) {
+    const res = await fetch(`https://api.github.com/repos/${cloud.repo}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${cloud.token}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      const err = new Error(`GitHub ${res.status}`);
+      err.status = res.status;
+      try { err.detail = (await res.json()).message; } catch (e) { /* no body */ }
+      throw err;
+    }
+    return res.status === 204 ? null : res.json();
+  }
+
+  function bufToBase64(buf) {
+    const bytes = new Uint8Array(buf);
+    let s = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+  function base64ToBytes(b64) {
+    const bin = atob(b64.replace(/\s/g, ''));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  async function sha256Hex(buf) {
+    const d = await crypto.subtle.digest('SHA-256', buf);
+    return Array.from(new Uint8Array(d)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  const extForType = (t) => ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' }[t] || 'bin');
+  const typeForExt = (e) => ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' }[e] || 'application/octet-stream');
+
+  // stable JSON (sorted keys) so the same design always hashes the same
+  function canonical(v) {
+    if (Array.isArray(v)) return '[' + v.map(canonical).join(',') + ']';
+    if (v && typeof v === 'object') return '{' + Object.keys(v).sort().filter((k) => v[k] !== undefined).map((k) => JSON.stringify(k) + ':' + canonical(v[k])).join(',') + '}';
+    return JSON.stringify(v === undefined ? null : v);
+  }
+  async function designHash(d) {
+    const core = { name: d.name, path: d.path, recipe: d.recipe, imageTransform: d.imageTransform, images: d.images };
+    return (await sha256Hex(new TextEncoder().encode(canonical(core)))).slice(0, 32);
+  }
+
+  async function ensureCloudRoot() {
+    if (!(await idbGet(IDB_STORE_FOLDERS, CLOUD_ROOT_ID))) {
+      await idbPut(IDB_STORE_FOLDERS, { id: CLOUD_ROOT_ID, parentId: null, name: CLOUD_ROOT_NAME, createdAt: 0 });
+    }
+  }
+
+  // folder id -> path of names below the Shared root (null if not inside it)
+  function sharedPath(folderId, foldersById) {
+    const names = [];
+    let id = folderId;
+    for (let guard = 0; id && guard < 50; guard++) {
+      if (id === CLOUD_ROOT_ID) return names.reverse();
+      const f = foldersById.get(id);
+      if (!f) return null;
+      names.push(f.name);
+      id = f.parentId;
+    }
+    return null;
+  }
+  async function folderForPath(path, folders) {
+    let parent = CLOUD_ROOT_ID;
+    for (const name of path) {
+      let f = folders.find((x) => x.parentId === parent && x.name === name);
+      if (!f) {
+        f = { id: makeId(), parentId: parent, name, createdAt: Date.now() };
+        await idbPut(IDB_STORE_FOLDERS, f);
+        folders.push(f);
+      }
+      parent = f.id;
+    }
+    return parent;
+  }
+
+  function cloudSetStatus(status, message) {
+    cloud.status = status;
+    cloud.message = message || '';
+    renderCloudBar();
+  }
+
+  async function cloudSync(reason) {
+    if (!cloud.token || cloud.syncing) return;
+    if (!navigator.onLine) { cloudSetStatus('offline', 'Offline: will sync when you are back online'); return; }
+    cloud.syncing = true;
+    cloudSetStatus('syncing', 'Syncing…');
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const done = await cloudSyncOnce();
+        if (done) break;
+      }
+    } catch (e) {
+      console.error('cloud sync failed', reason, e);
+      if (e.status === 401) cloudSetStatus('error', 'GitHub token rejected or expired: tap ⚙︎ to paste a new one');
+      else if (e.status === 404) cloudSetStatus('error', `Can't find repo ${cloud.repo} (or the token can't see it)`);
+      else cloudSetStatus('error', `Sync failed (${e.detail || e.message}). Will retry.`);
+      cloud.syncing = false;
+      return;
+    }
+    cloud.syncing = false;
+    cloud.lastSync = Date.now();
+    await idbSet(IDB_STORE_KV, 'cloudLastSync', cloud.lastSync);
+    cloudSetStatus('idle');
+    if (!libraryOverlay.classList.contains('hidden')) renderLibrary();
+  }
+
+  // returns false if the branch moved while we were working (caller retries)
+  async function cloudSyncOnce() {
+    await ensureCloudRoot();
+    // ---- remote state
+    let headSha = null, treeSha = null;
+    const remote = new Map();      // cloudId -> blob sha of designs/<id>.json
+    const remoteBlobs = new Map(); // "blobs/<hash>.<ext>" -> sha
+    try {
+      const ref = await gh('GET', `/git/ref/heads/${cloud.branch}`);
+      headSha = ref.object.sha;
+      const commit = await gh('GET', `/git/commits/${headSha}`);
+      treeSha = commit.tree.sha;
+      const tree = await gh('GET', `/git/trees/${treeSha}?recursive=1`);
+      for (const e of tree.tree) {
+        if (e.type !== 'blob') continue;
+        const m = e.path.match(/^designs\/([^/]+)\.json$/);
+        if (m) remote.set(m[1], e.sha);
+        else if (e.path.startsWith('blobs/')) remoteBlobs.set(e.path, e.sha);
+      }
+    } catch (e) {
+      if (e.status !== 409 && e.status !== 404) throw e; // 409 = empty repo: treat as no files
+      if (e.status === 404) { await gh('GET', ''); } // repo exists? (throws 404 if not)
+    }
+
+    // ---- local state (everything under the Shared root)
+    const [folders, projects] = await Promise.all([idbGetAllValues(IDB_STORE_FOLDERS), idbGetAllValues(IDB_STORE_PROJECTS)]);
+    const foldersById = new Map(folders.map((f) => [f.id, f]));
+    const local = new Map(); // cloudId -> { project, design, hash, blobs: {path: Blob} }
+    const claimed = new Set();
+    for (const p of projects) {
+      const path = sharedPath(p.folderId, foldersById);
+      if (!path) continue;
+      let cid = p.cloud && p.cloud.id;
+      // a duplicated/imported copy carries someone else's cloud id: give it its own
+      if (!cid || (p.cloud.localId && p.cloud.localId !== p.id) || claimed.has(cid)) cid = makeId();
+      claimed.add(cid);
+      const images = {}, blobs = {};
+      for (const k of CLOUD_BLOB_FIELDS) {
+        const b = p[k];
+        if (!b) continue;
+        const buf = await b.arrayBuffer();
+        const key = (await sha256Hex(buf)).slice(0, 32);
+        const bp = `blobs/${key}.${extForType(b.type)}`;
+        images[k] = bp;
+        blobs[bp] = b;
+      }
+      const design = {
+        format: 'rue-design', version: 1, id: cid, name: p.name, path,
+        updatedAt: p.updatedAt || Date.now(), recipe: p.recipe || null,
+        imageTransform: p.imageTransform || null, images,
+      };
+      local.set(cid, { project: p, design, hash: await designHash(design), blobs });
+    }
+
+    // ---- download remote designs we haven't seen in this exact version
+    const remoteDesigns = new Map(); // cid -> { design, hash, sha }
+    for (const [cid, sha] of remote) {
+      const k = cloud.known[cid];
+      if (k && k.sha === sha) { remoteDesigns.set(cid, { design: null, hash: k.hash, sha }); continue; }
+      const blob = await gh('GET', `/git/blobs/${sha}`);
+      const design = JSON.parse(new TextDecoder().decode(base64ToBytes(blob.content)));
+      remoteDesigns.set(cid, { design, hash: await designHash(design), sha });
+    }
+
+    // ---- decide
+    const toPush = [], toPull = [], delLocal = [], delRemote = [];
+    const ids = new Set([...local.keys(), ...remoteDesigns.keys()]);
+    for (const cid of ids) {
+      const L = local.get(cid), R = remoteDesigns.get(cid), K = cloud.known[cid];
+      if (L && R) {
+        if (L.hash === R.hash) continue;
+        if (K && L.hash === K.hash) toPull.push(cid);
+        else if (K && R.hash === K.hash) toPush.push(cid);
+        else {
+          if (!R.design) { const b = await gh('GET', `/git/blobs/${R.sha}`); R.design = JSON.parse(new TextDecoder().decode(base64ToBytes(b.content))); }
+          ((R.design.updatedAt || 0) > (L.design.updatedAt || 0) ? toPull : toPush).push(cid);
+        }
+      } else if (L) {
+        if (K && L.hash === K.hash) delLocal.push(cid); // deleted on the other side
+        else toPush.push(cid);
+      } else if (R) {
+        if (K && R.hash === K.hash) delRemote.push(cid); // deleted here
+        else toPull.push(cid);
+      }
+    }
+
+    // ---- push (one atomic commit)
+    let newHead = headSha;
+    const pushedShas = {};
+    if (toPush.length || delRemote.length) {
+      cloudSetStatus('syncing', `Uploading ${toPush.length} design${toPush.length === 1 ? '' : 's'}…`);
+      const treeItems = [];
+      const queued = new Set();
+      for (const cid of toPush) {
+        const L = local.get(cid);
+        for (const [bp, b] of Object.entries(L.blobs)) {
+          if (remoteBlobs.has(bp) || queued.has(bp)) continue;
+          const created = await gh('POST', '/git/blobs', { content: bufToBase64(await b.arrayBuffer()), encoding: 'base64' });
+          treeItems.push({ path: bp, mode: '100644', type: 'blob', sha: created.sha });
+          queued.add(bp);
+        }
+        const text = JSON.stringify(L.design, null, 2) + '\n';
+        const created = await gh('POST', '/git/blobs', { content: text, encoding: 'utf-8' });
+        pushedShas[cid] = created.sha;
+        treeItems.push({ path: `designs/${cid}.json`, mode: '100644', type: 'blob', sha: created.sha });
+      }
+      for (const cid of delRemote) treeItems.push({ path: `designs/${cid}.json`, mode: '100644', type: 'blob', sha: null });
+      const tree = await gh('POST', '/git/trees', treeSha ? { base_tree: treeSha, tree: treeItems } : { tree: treeItems.filter((t) => t.sha) });
+      const names = toPush.map((c) => local.get(c).design.name);
+      const msg = `App: ${toPush.length ? 'save ' + names.slice(0, 3).join(', ') + (names.length > 3 ? ` +${names.length - 3}` : '') : ''}${toPush.length && delRemote.length ? '; ' : ''}${delRemote.length ? `delete ${delRemote.length}` : ''}`;
+      const commit = await gh('POST', '/git/commits', { message: msg, tree: tree.sha, parents: headSha ? [headSha] : [] });
+      try {
+        if (headSha) await gh('PATCH', `/git/refs/heads/${cloud.branch}`, { sha: commit.sha, force: false });
+        else await gh('POST', '/git/refs', { ref: `refs/heads/${cloud.branch}`, sha: commit.sha });
+      } catch (e) {
+        if (e.status === 422 || e.status === 409) return false; // someone else saved meanwhile: start over
+        throw e;
+      }
+      newHead = commit.sha;
+    }
+
+    // ---- apply remote changes locally
+    cloud.writing = true;
+    try {
+      for (const cid of toPull) {
+        const R = remoteDesigns.get(cid);
+        if (!R.design) { const b = await gh('GET', `/git/blobs/${R.sha}`); R.design = JSON.parse(new TextDecoder().decode(base64ToBytes(b.content))); }
+        cloudSetStatus('syncing', `Downloading ${R.design.name}…`);
+        const d = R.design;
+        const L = local.get(cid);
+        const rec = L ? { ...L.project } : { id: makeId() };
+        rec.folderId = await folderForPath(Array.isArray(d.path) ? d.path : [], folders);
+        rec.name = String(d.name || 'Shared design');
+        rec.recipe = d.recipe || null;
+        rec.imageTransform = d.imageTransform || null;
+        rec.updatedAt = d.updatedAt || Date.now();
+        for (const k of CLOUD_BLOB_FIELDS) {
+          const bp = d.images && d.images[k];
+          if (!bp) { rec[k] = null; continue; }
+          if (L && L.blobs[bp]) { rec[k] = L.blobs[bp]; continue; } // already have this exact image
+          const sha = remoteBlobs.get(bp);
+          if (!sha) { rec[k] = null; continue; }
+          const b = await gh('GET', `/git/blobs/${sha}`);
+          rec[k] = new Blob([base64ToBytes(b.content)], { type: typeForExt(bp.split('.').pop()) });
+        }
+        rec.cloud = { id: cid, localId: rec.id };
+        await idbPut(IDB_STORE_PROJECTS, rec);
+        if (currentProject && currentProject.id === rec.id) setCurrentProject({ ...currentProject, name: rec.name, folderId: rec.folderId });
+      }
+      for (const cid of delLocal) {
+        const L = local.get(cid);
+        await idbDelete(IDB_STORE_PROJECTS, L.project.id);
+        if (currentProject && currentProject.id === L.project.id) setCurrentProject(null);
+      }
+      // stamp cloud ids onto local records that were just uploaded
+      for (const cid of toPush) {
+        const L = local.get(cid);
+        if (!L.project.cloud || L.project.cloud.id !== cid || L.project.cloud.localId !== L.project.id) {
+          await idbPut(IDB_STORE_PROJECTS, { ...L.project, cloud: { id: cid, localId: L.project.id } });
+        }
+      }
+    } finally {
+      cloud.writing = false;
+    }
+
+    // ---- remember this state as "known"
+    const known = {};
+    for (const cid of ids) {
+      if (delLocal.includes(cid) || delRemote.includes(cid)) continue;
+      const L = local.get(cid), R = remoteDesigns.get(cid);
+      if (toPush.includes(cid)) known[cid] = { hash: L.hash, sha: pushedShas[cid] };
+      else if (R) known[cid] = { hash: R.hash, sha: R.sha };
+    }
+    cloud.known = known;
+    await idbSet(IDB_STORE_KV, 'cloudKnown', known);
+    void newHead;
+    return true;
+  }
+
+  // sync soon after any change inside the Shared folder (and not for our own writes)
+  function cloudSchedule(delay = 2500) {
+    if (!cloud.token || cloud.writing) return;
+    clearTimeout(cloud.timer);
+    cloud.timer = setTimeout(() => cloudSync('change'), delay);
+  }
+
+  async function cloudConnect() {
+    const repo = prompt('Shared library repo (owner/name):', cloud.repo || CLOUD_DEFAULT_REPO);
+    if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo.trim())) return;
+    const token = prompt('Paste your GitHub access token for this repo.\n\nIt is stored only on this device.');
+    if (!token || !token.trim()) return;
+    const prev = { token: cloud.token, repo: cloud.repo };
+    cloud.token = token.trim();
+    cloud.repo = repo.trim();
+    try {
+      const info = await gh('GET', '');
+      cloud.branch = info.default_branch || 'main';
+      if (info.permissions && info.permissions.push === false) throw Object.assign(new Error('read-only'), { detail: 'this token can read the repo but not save to it' });
+    } catch (e) {
+      cloud.token = prev.token;
+      cloud.repo = prev.repo;
+      alert(`Couldn't connect: ${e.status === 401 ? 'GitHub rejected the token' : e.status === 404 ? "the repo wasn't found, or the token doesn't include it" : (e.detail || e.message)}.`);
+      return;
+    }
+    if (prev.repo !== cloud.repo) { cloud.known = {}; await idbSet(IDB_STORE_KV, 'cloudKnown', {}); }
+    await cloudSaveSettings();
+    await ensureCloudRoot();
+    cloudSetStatus('idle');
+    renderLibrary();
+    cloudSync('connect');
+  }
+
+  async function cloudSettingsMenu() {
+    if (!cloud.token) { cloudConnect(); return; }
+    const choice = prompt(`Shared library: ${cloud.repo}\n\nType 1 to change the token or repo\nType 2 to disconnect this device (designs stay on GitHub and here)`, '');
+    if (choice === '1') cloudConnect();
+    else if (choice === '2' && confirm('Disconnect this device from the shared library? Nothing is deleted.')) {
+      cloud.token = null;
+      await cloudSaveSettings();
+      cloudSetStatus('off');
+      renderLibrary();
+    }
+  }
+
+  function timeAgo(t) {
+    if (!t) return 'never';
+    const s = Math.round((Date.now() - t) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return `${Math.round(s / 60)} min ago`;
+    if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+    return new Date(t).toLocaleDateString();
+  }
+
+  function renderCloudBar() {
+    const bar = document.getElementById('cloudBar');
+    if (!bar) return;
+    if (!cloud.token) {
+      bar.innerHTML = '<span class="cloud-text">☁️ Share designs with Claude</span><button type="button" class="btn btn-secondary cloud-connect">Connect…</button>';
+      bar.querySelector('.cloud-connect').onclick = cloudConnect;
+      bar.dataset.state = 'off';
+      return;
+    }
+    const text = cloud.status === 'syncing' ? cloud.message
+      : cloud.status === 'error' || cloud.status === 'offline' ? cloud.message
+      : `Shared library synced ${timeAgo(cloud.lastSync)}`;
+    bar.innerHTML = `<span class="cloud-text"></span><button type="button" class="btn btn-secondary cloud-sync" ${cloud.syncing ? 'disabled' : ''}>Sync now</button><button type="button" class="btn btn-secondary cloud-gear" aria-label="Shared library settings">⚙︎</button>`;
+    bar.querySelector('.cloud-text').textContent = (cloud.status === 'error' ? '⚠️ ' : '☁️ ') + text;
+    bar.querySelector('.cloud-sync').onclick = () => cloudSync('manual');
+    bar.querySelector('.cloud-gear').onclick = cloudSettingsMenu;
+    bar.dataset.state = cloud.status;
+  }
+
+  window.addEventListener('online', () => cloudSchedule(500));
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && cloud.token && Date.now() - cloud.lastSync > 60000) cloudSchedule(800);
+  });
+  cloudLoadSettings().then(() => { renderCloudBar(); if (cloud.token) cloudSchedule(1500); });
 
   // ---------- library import / export ----------
   // A bundle is a single JSON file holding folders + projects (with every
@@ -1141,6 +1554,8 @@
       folder.name = name.trim();
       await idbPut(IDB_STORE_FOLDERS, folder);
       renderLibrary();
+    } else if (action === 'delete-folder' && id === CLOUD_ROOT_ID) {
+      alert('This is the shared library folder, so it can\'t be deleted. To stop syncing this device, use ⚙︎ in the Library.');
     } else if (action === 'delete-folder') {
       const ok = confirm("Delete this folder and everything inside it (subfolders and saved projects)?\n\nThis can't be undone.");
       if (!ok) return;
@@ -1152,6 +1567,7 @@
       const name = prompt('Rename project:', project.name);
       if (!name || !name.trim()) return;
       project.name = name.trim();
+      project.updatedAt = Date.now();
       await idbPut(IDB_STORE_PROJECTS, project);
       if (currentProject && currentProject.id === id) setCurrentProject({ ...currentProject, name: project.name });
       renderLibrary();
@@ -1275,11 +1691,13 @@
       renderLibrary();
       return true;
     }
+    const existing = await idbGet(IDB_STORE_PROJECTS, currentProject.id);
     const project = {
       id: currentProject.id,
       folderId: currentProject.folderId,
       name: currentProject.name,
       ...(await captureProjectFields()),
+      ...(existing && existing.cloud ? { cloud: existing.cloud } : {}),
     };
     const ok = await idbPut(IDB_STORE_PROJECTS, project);
     if (!ok) { alert("Couldn't save -- your browser's storage may be full. Try freeing up space (e.g. deleting an old saved project) and save again."); return false; }
@@ -1365,6 +1783,7 @@
     libraryPath = [];
     libraryOverlay.classList.remove('hidden');
     renderLibrary();
+    if (cloud.token && Date.now() - cloud.lastSync > 15000) cloudSync('open');
   }
 
   function closeLibrary() {

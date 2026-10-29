@@ -670,3 +670,12 @@ input[type="checkbox"] {
 .export-sheet-sub { margin: 0 0 4px; font-size: 13px; color: var(--text-dim); line-height: 1.4; word-break: break-word; }
 .export-sheet-card .btn { width: 100%; }
 .export-sheet-go[hidden] { display: none; }
+
+/* shared library (cloud) */
+.cloud-bar { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text-dim); }
+.cloud-bar .cloud-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cloud-bar .btn { padding: 6px 10px; font-size: 12px; flex-shrink: 0; }
+.cloud-bar[data-state="error"] .cloud-text { color: #ff8a8a; }
+.cloud-badge { font-size: 11px; font-weight: 600; flex-shrink: 0; padding: 2px 6px; border-radius: 6px; }
+.cloud-badge.ok { color: #7bd389; background: rgba(123,211,137,.1); }
+.cloud-badge.pending { color: #f3c969; background: rgba(243,201,105,.1); }
