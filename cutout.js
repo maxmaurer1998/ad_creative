@@ -26,12 +26,12 @@
   const MODEL_CACHE_KEY = 'models/isnet/isnet-medium.onnx';
   const SIZE = 1024;           // AI model input/output size
   const MAX_SIDE = 2400;       // longest side of the result (plenty for ads)
-  const SETTINGS_KEY = 'adCreativeCutoutSettings2';
+  const SETTINGS_KEY = 'adCreativeCutoutSettings3';
 
   const STYLES = {
-    flatlay: { strength: 25, soft: 55, dist: 12, angle: 300, contact: 25,
-      hint: 'Flat lay: the product lying on a surface, photographed from above. Soft, close shadow all round.' },
-    studio:  { strength: 30, soft: 45, dist: 35, angle: 315, contact: 25,
+    flatlay: { strength: 18, soft: 60, dist: 6, angle: 270, contact: 15,
+      hint: 'Flat lay: the product lying on a surface, lit from above. A subtle, soft shadow just below it.' },
+    studio:  { strength: 25, soft: 45, dist: 30, angle: 270, contact: 20,
       hint: 'Studio drop: lit from one side, so the shadow falls the other way. Use "Light from" to move it.' },
     floor:   { strength: 35, soft: 45, dist: 30, angle: 300, contact: 35,
       hint: 'Standing: for products photographed upright (not lying flat). The shadow falls on the floor behind.' },
