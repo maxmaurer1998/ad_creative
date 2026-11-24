@@ -935,13 +935,13 @@
           <button data-val="ai">AI</button>
         </div>
       </div>
-      <p class="hint-text">Colour is for plain backgrounds (product shots on white): it removes only the background colour, so nothing of the product is lost. AI is for busy backgrounds (wood, fur) and can miss parts on close-ups. Auto picks Colour whenever it can.</p>
+      <p class="hint-text">Colour is for plain backgrounds (product shots on white): it removes only the background colour and the photo's own shadow (checked by the AI), so nothing of the product is lost. AI is for busy backgrounds (wood, fur) and can miss parts on close-ups. Auto picks Colour whenever it can.</p>
       <div class="control-row">
         <button id="cutoutRunBtn" class="btn btn-primary" disabled>Remove background</button>
         <button id="cutoutCancelBtn" class="btn btn-secondary" hidden>Cancel</button>
       </div>
       <div class="enhance-progress" id="cutoutProgress" hidden><div class="enhance-progress-bar" id="cutoutProgressBar"></div></div>
-      <p class="hint-text" id="cutoutStatus">The AI method downloads an 88 MB model the first time (use Wi-Fi). Colour needs no download.</p>
+      <p class="hint-text" id="cutoutStatus">The first time, it downloads an 88 MB AI model (use Wi-Fi). After that it works offline.</p>
       <div id="cutoutControls" hidden>
         <div class="control-row">
           <label>Background</label>

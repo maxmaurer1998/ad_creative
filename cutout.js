@@ -65,6 +65,7 @@
   let usedMethod = '';      // 'colour' | 'ai'
   let aiRaw = null;         // { m: Float32Array(SIZE*SIZE), ox, oy, cw, ch }
   let alphaCache = null;    // { key, alpha }
+  let aiNote = '';
   let resultBlob = null;
   let method = 'auto';
   let bgColor = '#ded0ba';  // or 'none'
@@ -139,7 +140,7 @@
   els.ownShadow.addEventListener('change', changed);
 
   function resetAll() {
-    originalBlob = null; work = null; plain = null; aiRaw = null; alphaCache = null; resultBlob = null; usedMethod = '';
+    originalBlob = null; work = null; plain = null; aiRaw = null; alphaCache = null; resultBlob = null; usedMethod = ''; aiNote = '';
     els.controls.hidden = true;
   }
   document.addEventListener('adcreative:photo', () => {
@@ -287,6 +288,23 @@
       const ch = Math.max(Math.abs(r - m), Math.abs(g - m), Math.abs(b - m));
       neutral[i] = (Math.abs(ch - chb) <= 5 && m >= Lb * 0.5 && m <= Lb + 6) ? 1 : 0;
     }
+    // With the AI's help (when it's available), the photo's shadow can be
+    // told apart from pale product: pixels that are light and nearly
+    // colourless (a shadow on white picks up a faint warm or cool tint from
+    // the product beside it) count as shadow only where the AI says "not
+    // product". Strongly coloured or dark pixels are never removed this way,
+    // so leather, brass, cream canvas and black knit stay safe whatever the
+    // AI thinks.
+    const ai = (o.ownShadow && aiRaw) ? aiAtWork() : null;
+    if (ai) {
+      for (let i = 0, j = 0; i < N; i++, j += 4) {
+        if (neutral[i] || ai[i] >= 128) continue;
+        const r = data[j], g = data[j + 1], b = data[j + 2];
+        const m = L[i];
+        const ch = Math.max(Math.abs(r - m), Math.abs(g - m), Math.abs(b - m));
+        if (Math.abs(ch - chb) <= 14 && m >= Lb * 0.45 && m <= Lb + 6) neutral[i] = 2; // 2 = AI-confirmed shadow
+      }
+    }
     // 1 = background colour, 2 = the photo's own (soft, smooth) shadow
     const cand = new Uint8Array(N);
     for (let y = 0; y < h; y++) {
@@ -294,6 +312,7 @@
         const i = y * w + x;
         if (dist[i] < tol) { cand[i] = 1; continue; }
         if (!o.ownShadow || !neutral[i]) continue;
+        if (neutral[i] === 2) { cand[i] = 2; continue; }
         let mn = 255, mx = 0;
         for (let yy = Math.max(0, y - 1); yy <= Math.min(h - 1, y + 1); yy++) {
           for (let xx = Math.max(0, x - 1); xx <= Math.min(w - 1, x + 1); xx++) {
@@ -371,7 +390,7 @@
       for (let step = 0; step < maxSteps && front.length; step++) {
         const grown = [];
         const lim = step < 3 ? 40 : 16;
-        for (const i of front) if (range(i) <= lim) grown.push(i);
+        for (const i of front) if (neutral[i] === 2 || range(i) <= lim) grown.push(i);
         for (const i of grown) bg[i] = 1;
         const nf = [];
         const push = (q) => { if (!seen[q] && !bg[q] && neutral[q]) { seen[q] = 1; nf.push(q); } };
@@ -522,6 +541,24 @@
     if (res.output.dispose) res.output.dispose();
     return { m, ox, oy, cw, ch };
   }
+  // the AI model's raw answer (0..1, 1 = product) at working size
+  function aiAtWork() {
+    const { w, h } = work;
+    const small = canvasOf(SIZE, SIZE);
+    const sc = small.getContext('2d');
+    const id = sc.createImageData(SIZE, SIZE);
+    for (let i = 0, j = 0; i < aiRaw.m.length; i++, j += 4) { id.data[j] = id.data[j + 1] = id.data[j + 2] = 255; id.data[j + 3] = Math.round(aiRaw.m[i] * 255); }
+    sc.putImageData(id, 0, 0);
+    const big = canvasOf(w, h);
+    const bc = big.getContext('2d', { willReadFrequently: true });
+    bc.imageSmoothingEnabled = true; bc.imageSmoothingQuality = 'high';
+    bc.drawImage(small, aiRaw.ox, aiRaw.oy, aiRaw.cw, aiRaw.ch, 0, 0, w, h);
+    const d = bc.getImageData(0, 0, w, h).data;
+    const a = new Uint8Array(w * h);
+    for (let i = 0; i < a.length; i++) a[i] = d[i * 4 + 3];
+    return a;
+  }
+
   function aiAlpha(o) {
     const { w, h } = work;
     const small = canvasOf(SIZE, SIZE);
@@ -600,7 +637,7 @@
   }
 
   function getAlpha(o) {
-    const key = `${usedMethod}|${o.clean}|${o.trim}|${o.stray}|${o.ownShadow}`;
+    const key = `${usedMethod}|${o.clean}|${o.trim}|${o.stray}|${o.ownShadow}|${!!aiRaw}`;
     if (alphaCache && alphaCache.key === key) return alphaCache.alpha;
     const a = usedMethod === 'colour' ? colourAlpha(o) : aiAlpha(o);
     if (o.stray) removeStray(a, work.w, work.h);
@@ -734,7 +771,7 @@
     composeTimer = setTimeout(composeAndApply, 250);
   }
   function modeText() {
-    if (usedMethod === 'colour') return 'Plain background found, so it was cut out by its exact colour: every part of the product that differs from the background is kept. Adjust anything below; the design updates as you go.';
+    if (usedMethod === 'colour') return 'Plain background found, so it was cut out by its exact colour: every part of the product that differs from the background is kept' + (aiRaw ? ', and the AI checked the photo\'s own shadow' : '') + '. Adjust anything below; the design updates as you go.' + aiNote;
     return 'Cut out with the AI model (busy background). Check the edges: on close-ups it can miss parts of the product. If the photo has a plain background, choose Colour instead.';
   }
 
@@ -768,6 +805,16 @@
         return;
       }
       if (m === 'ai' && !aiRaw) aiRaw = await runAI(img);
+      if (m === 'colour' && els.ownShadow.checked && !aiRaw) {
+        // the AI helps tell the photo's own shadow from pale product; if it
+        // can't load (offline, old phone) the colour cut-out still works
+        try { aiRaw = await runAI(img); }
+        catch (e) {
+          if (e && e.message === 'cancelled') throw e;
+          console.warn('AI shadow help unavailable', e);
+          aiNote = ' (Shadow check without AI: some of the photo\'s own shadow may be left. Try again on Wi-Fi.)';
+        }
+      }
       usedMethod = m;
       setProgress(0.95);
       setStatus('Cutting out…');
