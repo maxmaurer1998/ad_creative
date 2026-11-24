@@ -1348,7 +1348,7 @@
     return new Date(t).toLocaleDateString();
   }
 
-  const APP_VERSION = 'v20';
+  const APP_VERSION = 'v21';
   function renderCloudBar() {
     const ver = document.getElementById('appVersion');
     if (ver) ver.textContent = `Ad Creative ${APP_VERSION}`;
@@ -1950,7 +1950,7 @@
     // same idea for free text boxes -- only draggable while their own tab is open
     state.freeTextEditMode = btn.dataset.panel === 'panel-freetext';
     // the Enhance tab only works on the photo, so show just the photo there
-    state.photoOnlyMode = btn.dataset.panel === 'panel-enhance';
+    state.photoOnlyMode = btn.dataset.panel === 'panel-enhance' || btn.dataset.panel === 'panel-cutout';
     render();
   });
 
