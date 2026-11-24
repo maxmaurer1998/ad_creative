@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ad-creative-v20';
+const CACHE_NAME = 'ad-creative-v21';
 
 const PRECACHE_URLS = [
   './',
@@ -6,6 +6,7 @@ const PRECACHE_URLS = [
   './styles.css',
   './app.js',
   './enhance.js',
+  './cutout.js',
   './manifest.webmanifest',
   './fonts/fonts.css',
   './fonts/inter-300.ttf',
@@ -64,7 +65,7 @@ self.addEventListener('fetch', (event) => {
   // GitHub API calls (shared library sync) always go straight to the network
   if (url.hostname === 'api.github.com') return;
   // the AI model has its own cache, managed by enhance.js
-  if (url.pathname.endsWith('.onnx')) return;
+  if (url.pathname.endsWith('.onnx') || url.pathname.includes('/models/')) return;
 
   if (isCoreAppFile(event.request, url)) {
     event.respondWith(
