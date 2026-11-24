@@ -306,15 +306,16 @@
     // group background-looking pixels into connected areas
     const lab = new Int32Array(N);
     const stack = new Int32Array(N);
-    const touches = [false], size = [0], exact = [0];
+    const touches = [false], size = [0], exact = [0], nearBg = [0];
     let next = 1;
     for (let st = 0; st < N; st++) {
       if (!cand[st] || lab[st]) continue;
-      let sp = 0, cnt = 0, ex = 0, edge = false;
+      let sp = 0, cnt = 0, ex = 0, nb = 0, edge = false;
       stack[sp++] = st; lab[st] = next;
       while (sp) {
         const p = stack[--sp]; cnt++;
         if (cand[p] === 1) ex++;
+        if (dist[p] < 16) nb++;
         const x = p % w, y = (p / w) | 0;
         if (x === 0 || y === 0 || x === w - 1 || y === h - 1) edge = true;
         if (x > 0 && cand[p - 1] && !lab[p - 1]) { lab[p - 1] = next; stack[sp++] = p - 1; }
@@ -322,28 +323,66 @@
         if (y > 0 && cand[p - w] && !lab[p - w]) { lab[p - w] = next; stack[sp++] = p - w; }
         if (y < h - 1 && cand[p + w] && !lab[p + w]) { lab[p + w] = next; stack[sp++] = p + w; }
       }
-      touches.push(edge); size.push(cnt); exact.push(ex); next++;
+      touches.push(edge); size.push(cnt); exact.push(ex); nearBg.push(nb); next++;
     }
     // background = areas touching the edge, plus enclosed areas that are
     // almost all exactly the background colour (belt holes, inside a buckle)
+    // Enclosed areas (inside a clip, a buckle, a belt hole, between straps):
+    //  - small ones count only if almost all exactly the background colour
+    //    (belt holes), so white print or stitching on the product is safe;
+    //  - larger ones (at least 0.04% of the photo) count if some of it is at
+    //    or very near the background colour and the rest is the soft, neutral
+    //    shading a gap gets (inside a belt loop or a clip).
+    const minGap = Math.max(200, N * 0.0004);
     const isBgLab = new Uint8Array(next);
     for (let l = 1; l < next; l++) {
       if (touches[l]) isBgLab[l] = 1;
       else if (size[l] >= 6 && exact[l] / size[l] >= 0.85) isBgLab[l] = 1;
+      else if (size[l] >= minGap && nearBg[l] >= 30 && nearBg[l] / size[l] >= 0.03) isBgLab[l] = 1;
     }
     const bg = new Uint8Array(N);
     for (let i = 0; i < N; i++) if (lab[i] && isBgLab[lab[i]]) bg[i] = 1;
     // the faint outer rim of the photo's shadow: neutral pixels right next to
     // the background (up to 3 px), which the smoothness test above can miss
+    // and the rest of the photo's shadow, which can be darker or have a
+    // steeper edge than the smoothness test allows (e.g. under a clip):
+    // grow the background outwards through neutral, fairly smooth pixels,
+    // up to 1.5% of the photo. Textured or shiny parts (leather grain, metal
+    // highlights) and anything with colour stop it.
     if (o.ownShadow) {
-      for (let pass = 0; pass < 3; pass++) {
-        const add = [];
-        for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
-          const i = y * w + x;
-          if (bg[i] || !neutral[i] || dist[i] > 40) continue;
-          if (bg[i - 1] || bg[i + 1] || bg[i - w] || bg[i + w]) add.push(i);
+      const maxSteps = Math.max(4, Math.round(Math.max(w, h) * 0.015));
+      const range = (i) => {
+        const x = i % w, y = (i / w) | 0;
+        let mn = 255, mx = 0;
+        for (let yy = Math.max(0, y - 1); yy <= Math.min(h - 1, y + 1); yy++) {
+          for (let xx = Math.max(0, x - 1); xx <= Math.min(w - 1, x + 1); xx++) {
+            const v = L[yy * w + xx]; if (v < mn) mn = v; if (v > mx) mx = v;
+          }
         }
-        for (const i of add) bg[i] = 1;
+        return mx - mn;
+      };
+      // each pixel is looked at once (seen), so this stays fast on big photos
+      const seen = new Uint8Array(N);
+      let front = [];
+      for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+        const i = y * w + x;
+        if (!bg[i] && neutral[i] && (bg[i - 1] || bg[i + 1] || bg[i - w] || bg[i + w])) { front.push(i); seen[i] = 1; }
+      }
+      for (let step = 0; step < maxSteps && front.length; step++) {
+        const grown = [];
+        const lim = step < 3 ? 40 : 16;
+        for (const i of front) if (range(i) <= lim) grown.push(i);
+        for (const i of grown) bg[i] = 1;
+        const nf = [];
+        const push = (q) => { if (!seen[q] && !bg[q] && neutral[q]) { seen[q] = 1; nf.push(q); } };
+        for (const i of grown) {
+          const x = i % w, y = (i / w) | 0;
+          if (x > 0) push(i - 1);
+          if (x < w - 1) push(i + 1);
+          if (y > 0) push(i - w);
+          if (y < h - 1) push(i + w);
+        }
+        front = nf;
       }
     }
     // alpha: background 0, product 1, and a proper soft edge: for product
