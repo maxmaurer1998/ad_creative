@@ -978,8 +978,8 @@
         <div class="control-row">
           <label>Shadow</label>
           <div class="segmented segmented-2x2" id="cutoutShadowStyle">
-            <button data-val="flatlay" class="active">Flat lay</button>
-            <button data-val="studio">Studio drop</button>
+            <button data-val="auto" class="active">Auto</button>
+            <button data-val="flatlay">Lying flat</button>
             <button data-val="floor">Standing</button>
             <button data-val="none">None</button>
           </div>
@@ -988,15 +988,15 @@
         <div id="cutoutShadowSliders">
           <div class="control-row">
             <label for="cutoutStrength">Strength <span id="cutoutStrengthVal"></span></label>
-            <input type="range" id="cutoutStrength" min="0" max="100" value="18" />
+            <input type="range" id="cutoutStrength" min="0" max="100" value="22" />
           </div>
           <div class="control-row">
             <label for="cutoutSoft">Softness <span id="cutoutSoftVal"></span></label>
-            <input type="range" id="cutoutSoft" min="0" max="100" value="60" />
+            <input type="range" id="cutoutSoft" min="0" max="100" value="25" />
           </div>
           <div class="control-row">
-            <label for="cutoutDist">Distance <span id="cutoutDistVal"></span></label>
-            <input type="range" id="cutoutDist" min="0" max="100" value="6" />
+            <label for="cutoutDist">Distance / spread <span id="cutoutDistVal"></span></label>
+            <input type="range" id="cutoutDist" min="0" max="100" value="12" />
           </div>
           <div class="control-row">
             <label for="cutoutAngle">Light from <span id="cutoutAngleVal"></span></label>
@@ -1004,7 +1004,7 @@
           </div>
           <div class="control-row">
             <label for="cutoutContact">Contact shadow <span id="cutoutContactVal"></span></label>
-            <input type="range" id="cutoutContact" min="0" max="100" value="15" />
+            <input type="range" id="cutoutContact" min="0" max="100" value="10" />
           </div>
           <p class="hint-text">Contact shadow is the dark line right where the product touches the surface. It's what makes it look placed rather than pasted.</p>
         </div>

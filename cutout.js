@@ -26,15 +26,14 @@
   const MODEL_CACHE_KEY = 'models/isnet/isnet-medium.onnx';
   const SIZE = 1024;           // AI model input/output size
   const MAX_SIDE = 2400;       // longest side of the result (plenty for ads)
-  const SETTINGS_KEY = 'adCreativeCutoutSettings3';
+  const SETTINGS_KEY = 'adCreativeCutoutSettings4';
 
   const STYLES = {
-    flatlay: { strength: 18, soft: 60, dist: 6, angle: 270, contact: 15,
-      hint: 'Flat lay: the product lying on a surface, lit from above. A subtle, soft shadow just below it.' },
-    studio:  { strength: 25, soft: 45, dist: 30, angle: 270, contact: 20,
-      hint: 'Studio drop: lit from one side, so the shadow falls the other way. Use "Light from" to move it.' },
-    floor:   { strength: 35, soft: 45, dist: 30, angle: 300, contact: 35,
-      hint: 'Standing: for products photographed upright (not lying flat). The shadow falls on the floor behind.' },
+    auto:    { hint: '' },
+    flatlay: { strength: 22, soft: 25, dist: 12, angle: 270, contact: 10,
+      hint: 'Lying flat (shot from above, light from the camera): a short, soft shadow just around and below the product.' },
+    floor:   { strength: 40, soft: 35, dist: 25, angle: 270, contact: 45,
+      hint: 'Standing (shot from the front, light from above): a shadow on the ground under the product, darkest where it touches.' },
     none:    { hint: 'No shadow: just the product on the colour.' },
   };
 
@@ -69,7 +68,7 @@
   let resultBlob = null;
   let method = 'auto';
   let bgColor = '#ded0ba';  // or 'none'
-  let style = 'flatlay';
+  let style = 'auto';
   let composeTimer = 0;
   let composeSeq = 0;
 
@@ -108,7 +107,9 @@
     els.trimVal.textContent = `${els.trim.value}`;
     [...els.method.querySelectorAll('button')].forEach((b) => b.classList.toggle('active', b.dataset.val === method));
     [...els.style.querySelectorAll('button')].forEach((b) => b.classList.toggle('active', b.dataset.val === style));
-    els.styleHint.textContent = STYLES[style].hint;
+    els.styleHint.textContent = style === 'auto'
+      ? (usedMethod ? `Auto: this photo looks ${detectedStyle() === 'floor' ? 'like a product standing up, so the shadow is on the ground under it' : 'like a product lying flat, so the shadow is short and just below it'}. Pick the other style if it's wrong.` : 'Auto: picks Standing or Lying flat from how the photo was shot.')
+      : STYLES[style].hint;
     els.sliders.hidden = style === 'none';
     [...els.swatches.querySelectorAll('button')].forEach((b) => b.classList.toggle('active', b.dataset.val === bgColor));
     if (bgColor !== 'none') els.bg.value = bgColor;
@@ -116,6 +117,10 @@
   }
 
   function changed() { syncLabels(); saveSettings(); scheduleCompose(); }
+  function applyPreset() {
+    const p = STYLES[resolvedStyle()];
+    if (p && p.strength != null) ['strength', 'soft', 'dist', 'angle', 'contact'].forEach((k) => { els[k].value = p[k]; });
+  }
 
   els.swatches.addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
@@ -126,8 +131,7 @@
   els.style.addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b || !STYLES[b.dataset.val]) return;
     style = b.dataset.val;
-    const p = STYLES[style];
-    if (p.strength != null) ['strength', 'soft', 'dist', 'angle', 'contact'].forEach((k) => { els[k].value = p[k]; });
+    applyPreset();
     changed();
   });
   els.method.addEventListener('click', (e) => {
@@ -445,6 +449,31 @@
       let t = (cr * vr + cg * vg + cb * vb) / vv;
       alpha[i] = t <= 0 ? 0 : t >= 1 ? 1 : t;
     }
+    // How was it shot? The photo's own shadow tells us: a standing product
+    // throws its shadow on the floor under its base; a product lying flat
+    // and shot from above has its shadow spread around its outline.
+    let x0 = w, x1 = -1, y0 = h, y1 = -1;
+    const bottomOf = new Int32Array(w).fill(-1);
+    for (let i = 0; i < N; i++) {
+      if (alpha[i] <= 0.5) continue;
+      const x = i % w, y = (i / w) | 0;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      if (y > bottomOf[x]) bottomOf[x] = y;
+    }
+    // shadow "under" the product = below the product's lowest point in that column
+    let mass = 0, under = 0;
+    for (let i = 0; i < N; i++) {
+      if (!bg[i] || L[i] > Lb - 12) continue;
+      if (lab[i] && !touches[lab[i]]) continue; // shading inside gaps doesn't say how it was shot
+      const wgt = Lb - L[i];
+      mass += wgt;
+      const x = i % w, y = (i / w) | 0;
+      if (bottomOf[x] >= 0 && y > bottomOf[x]) under += wgt;
+    }
+    const m = Math.max(2, Math.round(Math.min(w, h) * 0.01));
+    plain.edgesTouched = (x0 <= m) + (y0 <= m) + (x1 >= w - 1 - m) + (y1 >= h - 1 - m);
+    plain.shadowLow = mass > 0 ? under / mass : 0;
+    plain.shadowMass = mass / N;
     return alpha;
   }
 
@@ -627,9 +656,16 @@
     }
   }
 
+  // Auto: standing if most of the photo's own (visible) shadow sits in the
+  // bottom quarter of the product and below it; otherwise lying flat
+  function detectedStyle() {
+    if (usedMethod === 'colour' && plain && plain.edgesTouched < 2 && plain.shadowMass > 0.15 && plain.shadowLow >= 0.8) return 'floor';
+    return 'flatlay';
+  }
+  function resolvedStyle() { return style === 'auto' ? detectedStyle() : style; }
   function opts() {
     return {
-      bg: bgColor, light: els.light.value / 100, space: els.space.value / 100, style,
+      bg: bgColor, light: els.light.value / 100, space: els.space.value / 100, style: resolvedStyle(),
       strength: els.strength.value / 100, soft: els.soft.value / 100, dist: els.dist.value / 100,
       angle: +els.angle.value, contact: els.contact.value / 100,
       clean: els.clean.value / 100, trim: +els.trim.value, stray: els.stray.checked, ownShadow: els.ownShadow.checked,
@@ -709,34 +745,48 @@
       if (o.bg !== 'none') ctx.globalCompositeOperation = 'multiply';
       const rad = (o.angle + 180) * Math.PI / 180; // light FROM angle, shadow falls the other way
       if (o.style === 'floor') {
-        const baseY = box.y1;
-        const squash = 0.18 + o.dist * 0.5;
-        const lean = Math.cos(rad) * (0.4 + o.dist);
-        const tmp = canvasOf(W, H);
-        const tc = tmp.getContext('2d');
-        // point (x, y) -> (x + lean*(baseY - y), baseY - squash*(baseY - y))
-        tc.setTransform(1, 0, -lean, squash, pad + lean * baseY, pad + baseY * (1 - squash));
-        tc.drawImage(sil, 0, 0);
-        tc.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.globalAlpha = o.strength;
-        drawBlurred(ctx, tmp, (1 + o.soft * 5) * unit, 0, 0, W, H);
+        // Standing, light from above: a pool of shadow on the ground hugging
+        // the bottom outline of the product, plus a darker contact line
+        // right where it touches. Built column by column from the lowest
+        // product pixel, so a rolled belt gets shadow along its whole base.
+        const objW = box.x1 - box.x0, objH = box.y1 - box.y0;
+        const bottom = new Int32Array(w).fill(-1);
+        for (let x = box.x0; x < box.x1; x++) {
+          for (let y = box.y1 - 1; y >= box.y0; y--) if (alpha[y * w + x] > 0.5) { bottom[x] = y; break; }
+        }
+        const reach = box.y1 - objH * 0.12; // only the lowest part of the outline touches the ground (not a tail in mid-air)
+        const spread = Math.max(4, objW * (0.03 + o.dist * 0.08)); // how far the pool reaches out
+        const shift = Math.cos(rad) * spread * 0.8;                   // light from one side moves it the other way
+        const pool = canvasOf(W, H), pc = pool.getContext('2d');
+        const line = canvasOf(W, H), lc = line.getContext('2d');
+        pc.fillStyle = lc.fillStyle = shadowColorFor(o.bg);
+        for (let x = box.x0; x < box.x1; x++) {
+          const by = bottom[x];
+          if (by < 0 || by < reach) continue;
+          pc.fillRect(pad + x + shift, pad + by - spread * 0.3, 1.5, spread);
+          lc.fillRect(pad + x + shift * 0.15, pad + by - 2, 1.5, Math.max(2, unit * 0.25));
+        }
+        ctx.globalAlpha = Math.min(1, o.strength * 1.3);
+        drawBlurred(ctx, pool, (0.3 + o.soft * 1.5) * unit, 0, 0, W, H);
+        if (o.contact > 0) {
+          ctx.globalAlpha = o.contact * 0.85;
+          drawBlurred(ctx, line, Math.max(1.5, 0.25 * unit), 0, 0, W, H);
+        }
       } else {
-        const studio = o.style === 'studio';
-        const dd = o.dist * (studio ? 6 : 3) * unit;
+        // Lying flat, light from the camera: a short soft shadow just
+        // around the outline, nudged a little away from the light
+        const dd = o.dist * 3 * unit;
         const dx = Math.cos(rad) * dd, dy = Math.sin(rad) * dd;
-        const blurR = (0.8 + o.soft * (studio ? 6 : 8)) * unit;
-        // a wide, very soft shadow...
+        const blurR = (0.3 + o.soft * 4) * unit;
         ctx.globalAlpha = o.strength * 0.8;
         drawBlurred(ctx, sil, blurR, pad + dx, pad + dy, w, h);
-        // ...and a lighter core nearer the product
         ctx.globalAlpha = o.strength * 0.35;
-        drawBlurred(ctx, sil, blurR * 0.45, pad + dx * 0.5, pad + dy * 0.5, w, h);
-      }
-      // contact shadow: soft darkening right where the product meets the surface
-      if (o.contact > 0) {
-        const cr = Math.max(1.5, 0.5 * unit);
-        ctx.globalAlpha = o.contact * 0.55;
-        drawBlurred(ctx, sil, cr, pad + Math.cos(rad) * cr * 0.4, pad + Math.sin(rad) * cr * 0.4 + cr * 0.3, w, h);
+        drawBlurred(ctx, sil, blurR * 0.4, pad + dx * 0.5, pad + dy * 0.5, w, h);
+        if (o.contact > 0) {
+          const cr = Math.max(1.5, 0.3 * unit);
+          ctx.globalAlpha = o.contact * 0.5;
+          drawBlurred(ctx, sil, cr, pad + Math.cos(rad) * cr * 0.4, pad + Math.sin(rad) * cr * 0.4, w, h);
+        }
       }
       ctx.restore();
     }
@@ -820,6 +870,7 @@
       setStatus('Cutting out…');
       await nextFrame();
       els.controls.hidden = false;
+      if (style === 'auto') { applyPreset(); syncLabels(); }
       await composeAndApply();
       setProgress(1);
     } catch (e) {
@@ -875,7 +926,7 @@
   // test hook
   window.__cutout = {
     run, compose: () => composeAndApply(),
-    get method() { return usedMethod; }, get plain() { return plain; },
+    get method() { return usedMethod; }, get plain() { return plain; }, get shadowStyle() { return resolvedStyle(); }, get stats() { return plain && [plain.shadowLow, plain.shadowMass, plain.edgesTouched]; },
     alpha: () => (alphaCache ? alphaCache.alpha : null), size: () => (work ? [work.w, work.h] : null),
   };
 })();
