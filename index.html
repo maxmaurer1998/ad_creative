@@ -926,13 +926,22 @@
       <p class="hint-text">Takes from a few seconds to a few minutes depending on the photo and device. Keep this tab open while it runs. Phones are fastest in a browser with WebGPU.</p>
     </div>
     <div class="panel" id="panel-cutout">
-      <p class="hint-text">Removes the background with an AI model that runs on this device (nothing is uploaded), then puts the product on any colour with a realistic shadow. Text, logo and fade are hidden while this tab is open.</p>
+      <p class="hint-text">Takes the product off its background and puts it on any colour with a realistic shadow. Runs on this device; nothing is uploaded. Text, logo and fade are hidden while this tab is open.</p>
+      <div class="control-row">
+        <label>Method</label>
+        <div class="segmented" id="cutoutMethod">
+          <button data-val="auto" class="active">Auto</button>
+          <button data-val="colour">Colour</button>
+          <button data-val="ai">AI</button>
+        </div>
+      </div>
+      <p class="hint-text">Colour is for plain backgrounds (product shots on white): it removes only the background colour, so nothing of the product is lost. AI is for busy backgrounds (wood, fur) and can miss parts on close-ups. Auto picks Colour whenever it can.</p>
       <div class="control-row">
         <button id="cutoutRunBtn" class="btn btn-primary" disabled>Remove background</button>
         <button id="cutoutCancelBtn" class="btn btn-secondary" hidden>Cancel</button>
       </div>
       <div class="enhance-progress" id="cutoutProgress" hidden><div class="enhance-progress-bar" id="cutoutProgressBar"></div></div>
-      <p class="hint-text" id="cutoutStatus">First time only: downloads an 88 MB model (use Wi-Fi). After that it works offline.</p>
+      <p class="hint-text" id="cutoutStatus">The AI method downloads an 88 MB model the first time (use Wi-Fi). Colour needs no download.</p>
       <div id="cutoutControls" hidden>
         <div class="control-row">
           <label>Background</label>
@@ -979,23 +988,23 @@
         <div id="cutoutShadowSliders">
           <div class="control-row">
             <label for="cutoutStrength">Strength <span id="cutoutStrengthVal"></span></label>
-            <input type="range" id="cutoutStrength" min="0" max="100" value="35" />
+            <input type="range" id="cutoutStrength" min="0" max="100" value="25" />
           </div>
           <div class="control-row">
             <label for="cutoutSoft">Softness <span id="cutoutSoftVal"></span></label>
-            <input type="range" id="cutoutSoft" min="0" max="100" value="40" />
+            <input type="range" id="cutoutSoft" min="0" max="100" value="55" />
           </div>
           <div class="control-row">
             <label for="cutoutDist">Distance <span id="cutoutDistVal"></span></label>
-            <input type="range" id="cutoutDist" min="0" max="100" value="20" />
+            <input type="range" id="cutoutDist" min="0" max="100" value="12" />
           </div>
           <div class="control-row">
             <label for="cutoutAngle">Light from <span id="cutoutAngleVal"></span></label>
-            <input type="range" id="cutoutAngle" min="0" max="359" value="315" />
+            <input type="range" id="cutoutAngle" min="0" max="359" value="300" />
           </div>
           <div class="control-row">
             <label for="cutoutContact">Contact shadow <span id="cutoutContactVal"></span></label>
-            <input type="range" id="cutoutContact" min="0" max="100" value="45" />
+            <input type="range" id="cutoutContact" min="0" max="100" value="25" />
           </div>
           <p class="hint-text">Contact shadow is the dark line right where the product touches the surface. It's what makes it look placed rather than pasted.</p>
         </div>
@@ -1003,17 +1012,21 @@
           <summary>Edges</summary>
           <div class="control-row">
             <label for="cutoutClean">Clean-up <span id="cutoutCleanVal"></span></label>
-            <input type="range" id="cutoutClean" min="0" max="100" value="35" />
+            <input type="range" id="cutoutClean" min="0" max="100" value="30" />
           </div>
           <div class="control-row">
             <label for="cutoutTrim">Trim edge <span id="cutoutTrimVal"></span></label>
-            <input type="range" id="cutoutTrim" min="0" max="4" value="1" />
+            <input type="range" id="cutoutTrim" min="0" max="4" value="0" />
           </div>
           <div class="control-row">
             <label for="cutoutStray">Remove stray bits</label>
             <input type="checkbox" id="cutoutStray" checked />
           </div>
-          <p class="hint-text">If bits of the old background are left, raise Clean-up or Trim edge. If parts of the product are missing, lower them, or switch off Remove stray bits when there are two separate pieces.</p>
+          <div class="control-row">
+            <label for="cutoutOwnShadow">Remove the photo's own shadow</label>
+            <input type="checkbox" id="cutoutOwnShadow" checked />
+          </div>
+          <p class="hint-text">If a thin line of the old background is left around the product, raise Clean-up a little. If a pale part of the product (cream canvas, white stitching) starts to disappear, lower it. Trim edge shaves the outline; leave it at 0 unless there's a halo. If a light-grey part of the product goes missing, switch off Remove the photo's own shadow.</p>
         </details>
         <div class="control-row">
           <button id="cutoutRevertBtn" class="btn btn-secondary">Back to original photo</button>
